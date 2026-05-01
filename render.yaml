@@ -1,0 +1,41 @@
+services:
+  - type: web
+    name: coinbase-crypto-research-collector
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.5
+      - key: USE_MOCK_DATA
+        value: "false"
+      - key: DATA_DIR
+        value: /var/data/runtime
+      - key: QUOTE_CURRENCIES
+        value: '["USD"]'
+      - key: PREFERRED_BAR_GRANULARITY
+        value: ONE_HOUR
+      - key: COINAPI_PERIOD_ID
+        value: 1HRS
+      - key: LOOKBACK_HOURS
+        value: "336"
+      - key: TOP_N_BY_VOLUME
+        value: "500"
+      - key: MAX_UNIVERSE_SIZE
+        value: "500"
+      - key: ENABLE_COINAPI_QUOTES
+        value: "false"
+      - key: COINBASE_API_KEY_NAME
+        sync: false
+      - key: COINBASE_API_PRIVATE_KEY
+        sync: false
+      - key: COINBASE_BEARER_TOKEN
+        sync: false
+      - key: COINAPI_API_KEY
+        sync: false
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 5

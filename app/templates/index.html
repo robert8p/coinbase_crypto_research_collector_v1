@@ -1,0 +1,2121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ app_name }}</title>
+  <style>
+    :root {
+      --bg: #f4f7fb;
+      --surface: #ffffff;
+      --surface-alt: #f8fbff;
+      --surface-strong: #eef4ff;
+      --text: #15253d;
+      --muted: #607089;
+      --border: #dbe4f0;
+      --border-strong: #c7d5e8;
+      --primary: #1b63e8;
+      --primary-strong: #0f4ec7;
+      --success: #167a52;
+      --success-soft: #e9f8f1;
+      --warning: #9a5a00;
+      --warning-soft: #fff4df;
+      --danger: #b42318;
+      --danger-soft: #fdecec;
+      --info-soft: #edf5ff;
+      --shadow: 0 14px 36px rgba(21,37,61,.08);
+      --shadow-soft: 0 6px 18px rgba(21,37,61,.05);
+      --radius: 18px;
+      --radius-sm: 12px;
+      --content-width: 1480px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #f7faff 0%, var(--bg) 100%);
+      color: var(--text);
+    }
+
+    .app-shell {
+      max-width: var(--content-width);
+      margin: 0 auto;
+      padding: 18px;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, #122744 0%, #173760 60%, #1d4a7d 100%);
+      color: white;
+      border-radius: 24px;
+      padding: 22px;
+      box-shadow: 0 20px 48px rgba(16,29,50,.24);
+      margin-bottom: 18px;
+    }
+
+    .hero-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: clamp(1.45rem, 2.4vw, 2.2rem);
+      line-height: 1.1;
+      letter-spacing: -.02em;
+    }
+
+    .hero-subtitle {
+      margin: 8px 0 0;
+      max-width: 860px;
+      color: rgba(255,255,255,.84);
+      font-size: 0.98rem;
+      line-height: 1.5;
+    }
+
+    .hero-badges,
+    .pill-row,
+    .stats-inline {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .hero-badges { justify-content: flex-end; }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 12px;
+      border-radius: 999px;
+      font-size: .84rem;
+      font-weight: 600;
+      background: rgba(255,255,255,.12);
+      border: 1px solid rgba(255,255,255,.16);
+      color: white;
+      backdrop-filter: blur(12px);
+    }
+
+    .pill.soft {
+      background: var(--surface-strong);
+      border-color: transparent;
+      color: var(--primary);
+    }
+
+    .pill.neutral {
+      background: #edf2fa;
+      color: var(--muted);
+      border-color: transparent;
+    }
+
+    .pill.success { background: var(--success-soft); color: var(--success); border-color: transparent; }
+    .pill.warning { background: var(--warning-soft); color: var(--warning); border-color: transparent; }
+    .pill.danger { background: var(--danger-soft); color: var(--danger); border-color: transparent; }
+
+    .hero-stats {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .hero-stat {
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 16px;
+      padding: 14px;
+      min-width: 0;
+    }
+
+    .hero-stat .label,
+    .metric .label,
+    .section-copy,
+    .meta,
+    .help-text,
+    .table-meta,
+    .empty-state,
+    .muted {
+      color: var(--muted);
+      font-size: .92rem;
+      line-height: 1.45;
+    }
+
+    .hero-stat .label { color: rgba(255,255,255,.78); }
+    .hero-stat .value {
+      margin-top: 4px;
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: white;
+      letter-spacing: -.01em;
+      overflow-wrap: anywhere;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+    }
+
+    .metric {
+      background: var(--surface-alt);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 14px;
+      min-width: 0;
+      box-shadow: var(--shadow-soft);
+    }
+
+    .metric .value {
+      font-size: 1.3rem;
+      font-weight: 700;
+      margin-top: 4px;
+      color: var(--text);
+      overflow-wrap: anywhere;
+    }
+
+    .tabbar-wrap {
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      padding: 10px 0 14px;
+      background: linear-gradient(180deg, rgba(244,247,251,.95) 0%, rgba(244,247,251,.86) 100%);
+      backdrop-filter: blur(10px);
+      margin-bottom: 18px;
+    }
+
+    .tabbar {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin;
+    }
+
+    .tab {
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.82);
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 10px 14px;
+      font-size: .95rem;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: .18s ease;
+      box-shadow: var(--shadow-soft);
+    }
+
+    .tab[aria-selected="true"] {
+      background: var(--primary);
+      color: white;
+      border-color: transparent;
+      box-shadow: 0 10px 26px rgba(27,99,232,.24);
+    }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    .panel-stack {
+      display: grid;
+      gap: 16px;
+    }
+
+    .panel-grid {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+    }
+
+    .span-12 { grid-column: span 12; }
+    .span-8 { grid-column: span 8; }
+    .span-7 { grid-column: span 7; }
+    .span-6 { grid-column: span 6; }
+    .span-5 { grid-column: span 5; }
+    .span-4 { grid-column: span 4; }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid rgba(219,228,240,.9);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 18px;
+      min-width: 0;
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+
+    .card h2,
+    .card h3,
+    .card h4 {
+      margin: 0;
+      letter-spacing: -.02em;
+      line-height: 1.15;
+    }
+
+    .card h2 { font-size: 1.18rem; }
+    .card h3 { font-size: 1.04rem; }
+    .card h4 { font-size: .97rem; }
+
+    .section-copy { margin-top: 6px; max-width: 80ch; }
+
+    .subgrid { display: grid; gap: 12px; }
+    .subgrid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .subgrid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+    .controls,
+    .control-row {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      align-items: end;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: .9rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    input,
+    select,
+    textarea,
+    button {
+      font: inherit;
+    }
+
+    input,
+    select,
+    textarea {
+      width: 100%;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: white;
+      color: var(--text);
+      padding: 11px 12px;
+      transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      outline: none;
+      border-color: #85acf6;
+      box-shadow: 0 0 0 4px rgba(27,99,232,.11);
+    }
+
+    textarea { min-height: 110px; resize: vertical; }
+
+    .button-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      border: 0;
+      border-radius: 12px;
+      padding: 12px 14px;
+      cursor: pointer;
+      font-weight: 700;
+      transition: transform .14s ease, box-shadow .14s ease, opacity .14s ease;
+    }
+
+    button:hover { transform: translateY(-1px); }
+    button:disabled { opacity: .6; cursor: not-allowed; transform: none; }
+
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+      box-shadow: 0 10px 24px rgba(27,99,232,.22);
+    }
+
+    .btn-secondary {
+      background: #34455f;
+      color: white;
+      box-shadow: 0 8px 18px rgba(52,69,95,.18);
+    }
+
+    .btn-soft {
+      background: var(--surface-strong);
+      color: var(--primary);
+    }
+
+    .btn-ghost {
+      background: white;
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .helper,
+    .callout {
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: var(--surface-alt);
+      color: var(--muted);
+      font-size: .92rem;
+      line-height: 1.5;
+    }
+
+    .callout.info { background: var(--info-soft); color: #33527a; border-color: #d0e0ff; }
+    .callout.success { background: var(--success-soft); color: var(--success); border-color: #cfeadf; }
+    .callout.warning { background: var(--warning-soft); color: var(--warning); border-color: #f4deb3; }
+    .callout.danger { background: var(--danger-soft); color: var(--danger); border-color: #f7cfd0; }
+
+    .status-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .status-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 11px;
+      border-radius: 999px;
+      font-size: .84rem;
+      font-weight: 700;
+      background: #eef3fa;
+      color: var(--muted);
+    }
+
+    .status-chip .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: #9aa8bb;
+      flex: 0 0 auto;
+    }
+
+    .status-chip.running { background: var(--info-soft); color: var(--primary); }
+    .status-chip.running .dot { background: var(--primary); }
+    .status-chip.completed { background: var(--success-soft); color: var(--success); }
+    .status-chip.completed .dot { background: var(--success); }
+    .status-chip.failed { background: var(--danger-soft); color: var(--danger); }
+    .status-chip.failed .dot { background: var(--danger); }
+
+    .progress-shell {
+      display: grid;
+      gap: 8px;
+    }
+
+    .progress {
+      height: 11px;
+      background: #e7edf5;
+      border-radius: 999px;
+      overflow: hidden;
+      width: 100%;
+    }
+
+    .progress-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--primary), #5d95ff);
+      transition: width .2s ease;
+    }
+
+    .progress-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      font-size: .9rem;
+      color: var(--muted);
+    }
+
+    .timeline {
+      display: grid;
+      gap: 10px;
+    }
+
+    .timeline-row {
+      display: grid;
+      grid-template-columns: 150px minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+      padding: 12px 0;
+      border-bottom: 1px solid #edf2f8;
+    }
+
+    .timeline-row:last-child { border-bottom: 0; }
+
+    .timeline-label {
+      font-weight: 700;
+      color: var(--text);
+      font-size: .92rem;
+    }
+
+    .timeline-body { min-width: 0; }
+
+    .info-list,
+    .artifact-list,
+    .download-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .artifact-card {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--surface-alt);
+    }
+
+    .artifact-card strong {
+      display: block;
+      overflow-wrap: anywhere;
+      font-size: .95rem;
+    }
+
+    .artifact-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    .artifact-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 9px 12px;
+      border-radius: 10px;
+      background: var(--primary);
+      color: white;
+      text-decoration: none;
+      font-size: .88rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .artifact-button.secondary {
+      background: white;
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    .rule-layout {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: minmax(0, 1.05fr) minmax(320px, .95fr);
+    }
+
+    .rule-toolbar {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .rule-toolbar-left,
+    .rule-toolbar-right {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .rule-list {
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: var(--surface-alt);
+      padding: 8px;
+      max-height: 680px;
+      overflow: auto;
+    }
+
+    .rule-item {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+      padding: 12px;
+      border-radius: 14px;
+      border: 1px solid transparent;
+      transition: background .14s ease, border-color .14s ease, transform .14s ease;
+      margin-bottom: 8px;
+      background: white;
+      box-shadow: var(--shadow-soft);
+    }
+
+    .rule-item:last-child { margin-bottom: 0; }
+    .rule-item:hover { border-color: var(--border-strong); transform: translateY(-1px); }
+    .rule-item.selected { border-color: #8db0f6; background: #f4f8ff; }
+    .rule-item input { width: auto; margin-top: 4px; }
+
+    .rule-item-title {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 4px;
+    }
+
+    .rule-id {
+      font-size: .95rem;
+      font-weight: 800;
+      color: var(--text);
+      letter-spacing: -.01em;
+    }
+
+    .rule-name {
+      font-size: .96rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: .78rem;
+      font-weight: 700;
+      background: #eef4ff;
+      color: var(--primary);
+    }
+
+    .badge.custom { background: #f2ecff; color: #6f42c1; }
+    .badge.kind { background: #eef8ff; color: #1460c4; }
+
+    .rule-meta-block {
+      display: grid;
+      gap: 4px;
+      font-size: .84rem;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .rule-preview {
+      display: grid;
+      gap: 12px;
+    }
+
+    .rule-preview .preview-block {
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--surface-alt);
+    }
+
+    .rule-preview code,
+    pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #0f172a;
+      color: #e2e8f0;
+      border-radius: 16px;
+      padding: 14px;
+      max-height: 340px;
+      overflow: auto;
+      line-height: 1.45;
+      font-size: .88rem;
+    }
+
+    .feedback-box {
+      min-height: 88px;
+      max-height: 260px;
+    }
+
+    .scroll-x {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 920px;
+    }
+
+    th,
+    td {
+      padding: 11px 10px;
+      border-bottom: 1px solid #eaf0f7;
+      text-align: left;
+      vertical-align: top;
+      font-size: .91rem;
+    }
+
+    th {
+      font-size: .82rem;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      color: var(--muted);
+      background: #f8fbff;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+
+    .table-shell {
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+      background: white;
+    }
+
+    .table-toolbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      padding-bottom: 12px;
+    }
+
+    .kpi-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 28px 18px;
+      border: 1px dashed var(--border-strong);
+      border-radius: 16px;
+      background: var(--surface-alt);
+    }
+
+    .mini-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+
+    .info-table {
+      display: grid;
+      gap: 10px;
+    }
+
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid #edf2f8;
+      align-items: center;
+    }
+
+    .info-row:last-child { border-bottom: 0; }
+    .info-row .value { font-weight: 700; text-align: right; overflow-wrap: anywhere; }
+
+    details {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--surface-alt);
+      padding: 12px 14px;
+    }
+
+    details summary {
+      cursor: pointer;
+      font-weight: 700;
+      color: var(--text);
+      list-style: none;
+    }
+
+    details summary::-webkit-details-marker { display: none; }
+
+    .json-view {
+      max-height: 420px;
+      margin-top: 10px;
+    }
+
+    .anchor-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+
+    .anchor-link {
+      color: var(--primary);
+      text-decoration: none;
+      font-weight: 700;
+    }
+
+    .anchor-link:hover { text-decoration: underline; }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    @media (max-width: 1180px) {
+      .span-8,
+      .span-7,
+      .span-6,
+      .span-5,
+      .span-4 { grid-column: span 12; }
+      .rule-layout { grid-template-columns: 1fr; }
+      .hero-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+
+    @media (max-width: 640px) {
+      .hero-badges { justify-content: flex-start; }
+      .hero-subtitle { font-size: .94rem; }
+      .metric .value, .hero-stat .value { font-size: 1.14rem; }
+      .artifact-card, .rule-item { border-radius: 14px; }
+    }
+
+    @media (max-width: 720px) {
+      .app-shell { padding: 12px; }
+      .hero { border-radius: 20px; padding: 18px; }
+      .hero-stats { grid-template-columns: 1fr; }
+      .button-row { flex-direction: column; }
+      .button-row button,
+      .button-row .artifact-button,
+      .artifact-actions,
+      .artifact-button {
+        width: 100%;
+      }
+      .artifact-card {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      .timeline-row { grid-template-columns: 1fr; gap: 8px; }
+      .rule-toolbar { align-items: stretch; }
+      .rule-toolbar-left,
+      .rule-toolbar-right,
+      .status-strip,
+      .hero-badges,
+      .stats-inline,
+      .progress-meta {
+        width: 100%;
+        justify-content: flex-start;
+      }
+      table { min-width: 760px; }
+      .tab { padding: 10px 12px; font-size: .9rem; }
+      .controls,
+      .control-row,
+      .subgrid.cols-2,
+      .subgrid.cols-3 { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="hero">
+      <div class="hero-top">
+        <div>
+          <h1>{{ app_name }}</h1>
+          <p class="hero-subtitle">Structured operator workspace for Coinbase/CoinAPI collection, persistent rule management, historic backtesting, result export, and evidence review.</p>
+        </div>
+        <div class="hero-badges">
+          <span class="pill" id="heroVersionPill">Version {{ app_version }}</span>
+          <span class="pill" id="heroModePill">Loading mode…</span>
+          <span class="pill" id="heroLatestRunPill">Latest run: loading…</span>
+        </div>
+      </div>
+      <div class="hero-stats">
+        <div class="hero-stat">
+          <div class="label">Pipeline status</div>
+          <div class="value" id="heroPipelineState">Loading…</div>
+        </div>
+        <div class="hero-stat">
+          <div class="label">Effective collection window</div>
+          <div class="value" id="heroRunWindow">Loading…</div>
+        </div>
+        <div class="hero-stat">
+          <div class="label">Latest artifact pack</div>
+          <div class="value" id="heroArtifactState">Loading…</div>
+        </div>
+        <div class="hero-stat">
+          <div class="label">Rule library</div>
+          <div class="value" id="heroRuleState">Loading…</div>
+        </div>
+      </div>
+    </header>
+
+    <div class="tabbar-wrap">
+      <div class="tabbar" role="tablist" aria-label="Main workflows">
+        <button class="tab" role="tab" aria-selected="true" data-tab-target="overview" onclick="switchTab('overview')">Overview</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab-target="data" onclick="switchTab('data')">Data collection</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab-target="rules" onclick="switchTab('rules')">Rules</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab-target="backtesting" onclick="switchTab('backtesting')">Backtesting</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab-target="results" onclick="switchTab('results')">Results</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab-target="diagnostics" onclick="switchTab('diagnostics')">Diagnostics</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab-target="admin" onclick="switchTab('admin')">Admin</button>
+      </div>
+    </div>
+
+    <section class="tab-panel active" data-tab-panel="overview">
+      <div class="panel-stack">
+        <div class="panel-grid">
+          <div class="card span-8">
+            <div class="card-header">
+              <div>
+                <h2>Current operating picture</h2>
+                <p class="section-copy">See the latest run, what is happening now, and the fastest next action. This tab is designed to answer “where am I, what should I do next, and where will outputs appear?”</p>
+              </div>
+              <div class="status-strip" id="overviewStatusStrip"></div>
+            </div>
+            <div class="metric-grid" id="overviewMetrics"></div>
+            <div class="anchor-actions">
+              <button class="btn-primary" onclick="switchTab('data')">Go to data collection</button>
+              <button class="btn-secondary" onclick="switchTab('rules')">Manage rules</button>
+              <button class="btn-soft" onclick="switchTab('backtesting')">Run backtests</button>
+              <button class="btn-ghost" onclick="switchTab('results')">Open results</button>
+            </div>
+          </div>
+
+          <div class="card span-4">
+            <div class="card-header">
+              <div>
+                <h2>Next best action</h2>
+                <p class="section-copy">Operator guidance based on current app state.</p>
+              </div>
+            </div>
+            <div class="callout info" id="nextActionCallout">Loading…</div>
+            <div class="mini-grid" style="margin-top: 14px;">
+              <div class="metric">
+                <div class="label">Latest run ID</div>
+                <div class="value" id="overviewRunId">—</div>
+              </div>
+              <div class="metric">
+                <div class="label">Latest backtest</div>
+                <div class="value" id="overviewBacktestId">—</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-grid">
+          <div class="card span-7">
+            <div class="card-header">
+              <div>
+                <h2>Pipeline progress</h2>
+                <p class="section-copy">Live visibility into each collection step, with clear running, completed, and failed states.</p>
+              </div>
+              <button class="btn-ghost" onclick="refreshStatus(true)">Refresh now</button>
+            </div>
+            <div class="progress-shell">
+              <div class="progress"><div id="globalProgressBar" class="progress-bar"></div></div>
+              <div class="progress-meta">
+                <span id="globalProgressLabel">No active pipeline run.</span>
+                <span id="globalProgressDetail">—</span>
+              </div>
+            </div>
+            <div class="timeline" id="pipelineTimeline"></div>
+          </div>
+
+          <div class="card span-5">
+            <div class="card-header">
+              <div>
+                <h2>Latest outputs</h2>
+                <p class="section-copy">Recent research artifacts and backtest packs for immediate download.</p>
+              </div>
+            </div>
+            <div class="download-list" id="overviewLatestArtifacts"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-tab-panel="data">
+      <div class="panel-stack">
+        <div class="panel-grid">
+          <div class="card span-7">
+            <div class="card-header">
+              <div>
+                <h2>Configure and run collection</h2>
+                <p class="section-copy">Set the data window once, then run the whole pipeline or any individual step. The app uses the same collection settings for both full runs and standalone historical pulls.</p>
+              </div>
+              <span class="pill soft">Primary workflow</span>
+            </div>
+            <div class="controls">
+              <div>
+                <label for="lookbackHours">Lookback hours</label>
+                <input id="lookbackHours" type="number" min="24" step="24" />
+              </div>
+              <div>
+                <label for="maxProducts">Max products</label>
+                <input id="maxProducts" type="number" min="1" step="1" placeholder="Blank = use env/default" />
+              </div>
+            </div>
+            <div class="callout info" style="margin-top: 12px;">Use <strong>Run full pipeline</strong> when you want a fully fresh artifact pack. Use individual steps only when you are deliberately re-running part of the workflow.</div>
+            <div class="button-row" style="margin-top: 14px;">
+              <button class="btn-primary" onclick="runConfiguredPipeline()">Run full pipeline</button>
+              <button class="btn-soft" onclick="pullHistoricalData()">Pull historical data</button>
+              <button class="btn-secondary" onclick="postJson('/api/export/build', {compress_chatgpt_csv: true})">Build research export</button>
+            </div>
+            <div class="button-row">
+              <button class="btn-ghost" onclick="postJson('/api/universe/refresh', {})">Refresh Coinbase universe</button>
+              <button class="btn-ghost" onclick="postJson('/api/mappings/refresh', {})">Refresh symbol mappings</button>
+              <button class="btn-ghost" onclick="postJson('/api/features/compute', {})">Compute features</button>
+            </div>
+          </div>
+
+          <div class="card span-5">
+            <div class="card-header">
+              <div>
+                <h2>Collection snapshot</h2>
+                <p class="section-copy">Quick indicators for the latest universe, mapping, pull, and feature state.</p>
+              </div>
+            </div>
+            <div class="metric-grid" id="dataMetrics"></div>
+          </div>
+        </div>
+
+        <div class="panel-grid">
+          <div class="card span-7">
+            <div class="card-header">
+              <div>
+                <h2>Collection feedback</h2>
+                <p class="section-copy">Clear confirmation when runs start, progress, complete, or fail.</p>
+              </div>
+              <div class="status-strip" id="dataStatusStrip"></div>
+            </div>
+            <pre id="statusBox" class="feedback-box">Loading…</pre>
+          </div>
+
+          <div class="card span-5">
+            <div class="card-header">
+              <div>
+                <h2>Quick report previews</h2>
+                <p class="section-copy">Preview the latest summaries without leaving the app.</p>
+              </div>
+            </div>
+            <div class="button-row">
+              <button class="btn-secondary" onclick="fetchPreview('/api/reports/data-quality', 'reportBox', 'diagnostics')">View data-quality summary</button>
+              <button class="btn-secondary" onclick="fetchPreview('/api/reports/comparative-insight', 'reportBox', 'diagnostics')">View comparative insight summary</button>
+            </div>
+            <pre id="reportBox" class="feedback-box" style="margin-top: 12px;">No report loaded yet.</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-tab-panel="rules">
+      <div class="panel-stack">
+        <div class="panel-grid">
+          <div class="card span-5">
+            <div class="card-header">
+              <div>
+                <h2>Add rules by JSON</h2>
+                <p class="section-copy">Upload one or many JSON files, or paste JSON directly. Saved rules join the persistent library and remain available after reload when persistent storage is enabled.</p>
+              </div>
+            </div>
+            <label for="ruleJsonFiles">Batch JSON upload</label>
+            <input id="ruleJsonFiles" type="file" accept=".json,application/json" multiple />
+            <label for="ruleJsonPaste" style="margin-top: 12px;">Paste JSON</label>
+            <textarea id="ruleJsonPaste" placeholder='Paste a rule object, a list of rules, or an object with "candidate_rules" / "rules".'></textarea>
+            <div class="button-row" style="margin-top: 14px;">
+              <button class="btn-primary" onclick="uploadRuleLibraryJson()">Save uploaded / pasted rules</button>
+              <button class="btn-ghost" onclick="clearRuleUploadInputs()">Clear upload inputs</button>
+            </div>
+            <pre id="ruleUploadBox" class="feedback-box" style="margin-top: 12px;">No rule upload yet.</pre>
+          </div>
+
+          <div class="card span-7">
+            <div class="card-header">
+              <div>
+                <h2>Rule library</h2>
+                <p class="section-copy">Browse the persistent rule list, filter it, select a focused working set, and inspect rule details before testing.</p>
+              </div>
+              <div class="status-strip" id="ruleLibraryPills"></div>
+            </div>
+
+            <div class="rule-layout">
+              <div>
+                <div class="rule-toolbar">
+                  <div class="rule-toolbar-left">
+                    <div style="min-width: 220px;">
+                      <label for="ruleSearch" class="sr-only">Search rules</label>
+                      <input id="ruleSearch" type="search" placeholder="Search by ID, name, family, or source…" />
+                    </div>
+                    <div style="min-width: 160px;">
+                      <label for="ruleSourceFilter" class="sr-only">Filter by source</label>
+                      <select id="ruleSourceFilter">
+                        <option value="all">All libraries</option>
+                        <option value="builtin">Bundled only</option>
+                        <option value="custom">Custom only</option>
+                      </select>
+                    </div>
+                    <div style="min-width: 180px;">
+                      <label for="ruleKindFilter" class="sr-only">Filter by rule kind</label>
+                      <select id="ruleKindFilter">
+                        <option value="all">All rule kinds</option>
+                        <option value="direct_rule">Direct rules</option>
+                        <option value="routing_hypothesis">Routing hypotheses</option>
+                        <option value="execution_test">Execution tests</option>
+                        <option value="follow_up_test">Follow-up tests</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="rule-toolbar-right">
+                    <button class="btn-soft" onclick="selectVisibleRules()">Select visible</button>
+                    <button class="btn-ghost" onclick="clearRuleSelection()">Clear selection</button>
+                    <button class="btn-ghost" onclick="loadRuleLibrary(true)">Reload library</button>
+                  </div>
+                </div>
+                <div class="kpi-row" id="ruleLibrarySummary"></div>
+                <div id="ruleList" class="rule-list" style="margin-top: 12px;"></div>
+              </div>
+
+              <aside class="rule-preview">
+                <div class="preview-block">
+                  <h3>Selected rules</h3>
+                  <p class="section-copy" id="selectedRuleSummary">No rules selected.</p>
+                  <div class="button-row">
+                    <button class="btn-primary" onclick="switchTab('backtesting')">Go to backtesting</button>
+                    <button class="btn-ghost" onclick="copySelectedRuleIds()">Copy selected IDs</button>
+                  </div>
+                </div>
+                <div class="preview-block">
+                  <h3>Rule preview</h3>
+                  <div id="rulePreviewContent" class="empty-state" style="padding: 20px;">Select a rule to inspect its structure, source attribution, and notes.</div>
+                </div>
+              </aside>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-tab-panel="backtesting">
+      <div class="panel-stack">
+        <div class="panel-grid">
+          <div class="card span-5">
+            <div class="card-header">
+              <div>
+                <h2>Backtest setup</h2>
+                <p class="section-copy">Make it obvious what is being tested, at what horizon, and with which rule set before you run.</p>
+              </div>
+            </div>
+            <div class="controls">
+              <div>
+                <label for="ruleHorizon">Testing horizon</label>
+                <select id="ruleHorizon">
+                  <option value="auto">auto (use rule metadata)</option>
+                  <option value="h1">h1</option>
+                  <option value="h4" selected>h4</option>
+                  <option value="h24">h24</option>
+                </select>
+              </div>
+            </div>
+            <div class="callout info" style="margin-top: 12px;" id="backtestConfigSummary">No rules selected yet. Choose one or more rules on the Rules tab, then return here to run them.</div>
+            <div class="button-row" style="margin-top: 14px;">
+              <button class="btn-primary" onclick="runRuleBacktests('selected', 'individual')">Test selected individually</button>
+              <button class="btn-secondary" onclick="runRuleBacktests('selected', 'collective')">Test selected collectively</button>
+              <button class="btn-soft" onclick="runRuleBacktests('selected', 'both')">Test selected both ways</button>
+            </div>
+            <div class="button-row">
+              <button class="btn-primary" onclick="runRuleBacktests('all', 'individual')">Test all rules</button>
+              <button class="btn-secondary" onclick="runRuleBacktests('all', 'collective')">Test all collectively</button>
+            </div>
+          </div>
+
+          <div class="card span-7">
+            <div class="card-header">
+              <div>
+                <h2>Backtest progress and feedback</h2>
+                <p class="section-copy">Visible running state, explicit completion state, result-pack visibility, and readable summaries.</p>
+              </div>
+            </div>
+            <div class="progress-shell">
+              <div class="progress"><div id="ruleProgressBar" class="progress-bar"></div></div>
+              <div class="progress-meta">
+                <span id="ruleProgressLabel">No backtest running.</span>
+                <span id="ruleProgressDetail">—</span>
+              </div>
+            </div>
+            <pre id="ruleBacktestBox" class="feedback-box" style="margin-top: 12px;">No backtest run yet.</pre>
+            <div class="download-list" id="ruleBacktestArtifacts" style="margin-top: 12px;"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h2>Backtest results table</h2>
+              <p class="section-copy">Readable summary of the latest response: support, breadth, concentration, return, touch rate, uplift, and target horizon.</p>
+            </div>
+            <div class="kpi-row" id="backtestResultSummary"></div>
+          </div>
+          <div class="table-shell">
+            <div class="scroll-x">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Rule</th>
+                    <th>Status</th>
+                    <th>Library</th>
+                    <th>Support</th>
+                    <th>Products</th>
+                    <th>Largest share</th>
+                    <th>Mean return</th>
+                    <th>Touch rate</th>
+                    <th>Uplift</th>
+                    <th>Horizon</th>
+                  </tr>
+                </thead>
+                <tbody id="ruleBacktestTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-tab-panel="results">
+      <div class="panel-stack">
+        <div class="panel-grid">
+          <div class="card span-6">
+            <div class="card-header">
+              <div>
+                <h2>Latest research artifacts</h2>
+                <p class="section-copy">Run-stamped collection outputs from the latest coherent pipeline run.</p>
+              </div>
+            </div>
+            <div class="download-list" id="resultsRunArtifacts"></div>
+          </div>
+
+          <div class="card span-6">
+            <div class="card-header">
+              <div>
+                <h2>Latest rule-backtest artifacts</h2>
+                <p class="section-copy">Summary CSVs, detail files, and downloadable packs from the latest backtest run.</p>
+              </div>
+            </div>
+            <div class="download-list" id="latestRuleBacktestArtifacts"></div>
+          </div>
+        </div>
+
+        <div class="panel-grid">
+          <div class="card span-12">
+            <div class="card-header">
+              <div>
+                <h2>Latest generated files</h2>
+                <p class="section-copy">Files are listed with clear download actions so outputs do not feel hidden or ambiguous.</p>
+              </div>
+              <button class="btn-ghost" onclick="refreshStatus(true)">Refresh file list</button>
+            </div>
+            <div class="table-shell">
+              <div class="scroll-x">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Modified</th>
+                      <th>Size</th>
+                      <th>Download</th>
+                    </tr>
+                  </thead>
+                  <tbody id="artifactTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-tab-panel="diagnostics">
+      <div class="panel-stack">
+        <div class="panel-grid">
+          <div class="card span-5">
+            <div class="card-header">
+              <div>
+                <h2>Warnings and failures</h2>
+                <p class="section-copy">Review current errors, stale states, and warnings without digging through the full JSON.</p>
+              </div>
+            </div>
+            <div id="diagnosticWarnings"></div>
+          </div>
+
+          <div class="card span-7">
+            <div class="card-header">
+              <div>
+                <h2>Diagnostics quick actions</h2>
+                <p class="section-copy">Useful operator checks, previews, and raw outputs for troubleshooting.</p>
+              </div>
+            </div>
+            <div class="button-row">
+              <button class="btn-secondary" onclick="fetchPreview('/api/reports/data-quality', 'reportBox', 'diagnostics')">Load data-quality preview</button>
+              <button class="btn-secondary" onclick="fetchPreview('/api/reports/comparative-insight', 'reportBox', 'diagnostics')">Load comparative preview</button>
+              <button class="btn-ghost" onclick="runRule()">Run sample scope comparison</button>
+            </div>
+            <div class="helper" style="margin-top: 12px;">Use this area when something looks stuck, unexpectedly empty, or different from what you expected. The raw views below remain available, but the warnings panel should surface the important bits first.</div>
+          </div>
+        </div>
+
+        <details open>
+          <summary>Raw status JSON</summary>
+          <pre id="diagnosticStatusJson" class="json-view">Loading…</pre>
+        </details>
+        <details>
+          <summary>Raw latest backtest summary</summary>
+          <pre id="diagnosticBacktestJson" class="json-view">No latest backtest loaded yet.</pre>
+        </details>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-tab-panel="admin">
+      <div class="panel-stack">
+        <div class="panel-grid">
+          <div class="card span-4">
+            <div class="card-header">
+              <div>
+                <h2>Default settings</h2>
+                <p class="section-copy">Current environment-backed defaults for the service.</p>
+              </div>
+            </div>
+            <div class="info-table" id="defaultSettingsTable"></div>
+          </div>
+
+          <div class="card span-4">
+            <div class="card-header">
+              <div>
+                <h2>Effective latest run settings</h2>
+                <p class="section-copy">What the latest coherent run actually used.</p>
+              </div>
+            </div>
+            <div class="info-table" id="effectiveSettingsTable"></div>
+          </div>
+
+          <div class="card span-4">
+            <div class="card-header">
+              <div>
+                <h2>Service metadata</h2>
+                <p class="section-copy">Version, run IDs, and quick admin actions.</p>
+              </div>
+            </div>
+            <div class="info-table" id="serviceMetaTable"></div>
+            <div class="button-row" style="margin-top: 12px;">
+              <button class="btn-ghost" onclick="refreshStatus(true)">Refresh status</button>
+              <button class="btn-ghost" onclick="loadRuleLibrary(true)">Reload rule library</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h2>Operator notes</h2>
+              <p class="section-copy">Practical guidance for repeat operation and mobile use.</p>
+            </div>
+          </div>
+          <div class="mini-grid">
+            <div class="callout info">Run <strong>full pipeline</strong> when you want a fully fresh research pack. Standalone steps are best for deliberate partial reruns.</div>
+            <div class="callout info">Uploaded custom rules persist only if your persistent disk is mounted correctly. Without persistent storage, custom rules vanish on rebuild/restart.</div>
+            <div class="callout info">Backtest downloads are easier to trust when the pipeline and backtests complete on the same deployed version. The app now surfaces run IDs and latest-run metadata more clearly.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const INITIAL_BOOT = {
+      status: {{ status|tojson }},
+      exports: {{ exports|tojson }},
+      latest_rule_backtest: {{ latest_rule_backtest|tojson }},
+      rule_library: {{ rule_library|tojson }},
+      app_name: {{ app_name|tojson }},
+      app_version: {{ app_version|tojson }},
+    };
+
+    const STORAGE_KEYS = {
+      lookbackHours: 'ccrc.lookbackHours',
+      maxProducts: 'ccrc.maxProducts',
+      ruleHorizon: 'ccrc.ruleHorizon',
+      selectedRuleIds: 'ccrc.selectedRuleIds',
+      activeTab: 'ccrc.activeTab',
+    };
+
+    let pollTimer = null;
+    let ruleLibrary = INITIAL_BOOT.rule_library?.rules || [];
+    let currentStatusData = {
+      status: INITIAL_BOOT.status || {},
+      exports: INITIAL_BOOT.exports || [],
+      latest_rule_backtest: INITIAL_BOOT.latest_rule_backtest || {},
+      settings: {},
+      effective_run_settings: {},
+      latest_run: {},
+    };
+    let lastRuleBacktestResponse = null;
+
+    const el = (id) => document.getElementById(id);
+
+    function htmlEscape(value) {
+      return String(value ?? '').replace(/[&<>"']/g, char => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[char]));
+    }
+
+    function fmtNum(value) {
+      if (value === null || value === undefined || value === '') return '—';
+      const num = Number(value);
+      return Number.isFinite(num) ? num.toLocaleString() : String(value);
+    }
+
+    function fmtDecimal(value, digits = 4) {
+      if (value === null || value === undefined || value === '') return '—';
+      const num = Number(value);
+      return Number.isFinite(num) ? num.toFixed(digits) : String(value);
+    }
+
+    function fmtPercent(value, digits = 1) {
+      if (value === null || value === undefined || value === '') return '—';
+      const num = Number(value);
+      return Number.isFinite(num) ? `${(num * 100).toFixed(digits)}%` : String(value);
+    }
+
+    function humanBytes(value) {
+      const num = Number(value);
+      if (!Number.isFinite(num) || num <= 0) return '—';
+      const units = ['B', 'KB', 'MB', 'GB'];
+      let idx = 0;
+      let v = num;
+      while (v >= 1024 && idx < units.length - 1) {
+        v /= 1024;
+        idx += 1;
+      }
+      return `${v.toFixed(v >= 100 || idx === 0 ? 0 : 1)} ${units[idx]}`;
+    }
+
+    function fmtDate(value) {
+      if (!value) return '—';
+      try {
+        return new Date(value).toLocaleString();
+      } catch {
+        return String(value);
+      }
+    }
+
+    function statusClass(status) {
+      const normalized = String(status || '').toLowerCase();
+      if (normalized === 'completed') return 'completed';
+      if (normalized === 'failed') return 'failed';
+      if (normalized === 'running') return 'running';
+      return '';
+    }
+
+    function setText(id, value) {
+      const node = el(id);
+      if (node) node.textContent = value;
+    }
+
+    function setHtml(id, value) {
+      const node = el(id);
+      if (node) node.innerHTML = value;
+    }
+
+    function setMessage(id, value) {
+      setText(id, typeof value === 'string' ? value : JSON.stringify(value, null, 2));
+    }
+
+    function parseOptionalNumber(value) {
+      const trimmed = String(value ?? '').trim();
+      if (!trimmed) return null;
+      const parsed = Number(trimmed);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    function getSelectedRuleIds() {
+      return Array.from(document.querySelectorAll('.rule-checkbox:checked')).map(el => el.value);
+    }
+
+    function persistControls() {
+      localStorage.setItem(STORAGE_KEYS.lookbackHours, el('lookbackHours').value);
+      localStorage.setItem(STORAGE_KEYS.maxProducts, el('maxProducts').value);
+      localStorage.setItem(STORAGE_KEYS.ruleHorizon, el('ruleHorizon').value);
+      localStorage.setItem(STORAGE_KEYS.selectedRuleIds, JSON.stringify(getSelectedRuleIds()));
+    }
+
+    function persistedSelectedRuleIds() {
+      try {
+        return new Set(JSON.parse(localStorage.getItem(STORAGE_KEYS.selectedRuleIds) || '[]'));
+      } catch {
+        return new Set();
+      }
+    }
+
+    function saveSelectedRuleIds() {
+      localStorage.setItem(STORAGE_KEYS.selectedRuleIds, JSON.stringify(getSelectedRuleIds()));
+      updateRuleSelectionSummary();
+      updateBacktestConfigSummary();
+      renderRulePreview();
+    }
+
+    function switchTab(tabName) {
+      document.querySelectorAll('.tab').forEach(tab => {
+        const active = tab.dataset.tabTarget === tabName;
+        tab.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+      document.querySelectorAll('[data-tab-panel]').forEach(panel => {
+        panel.classList.toggle('active', panel.dataset.tabPanel === tabName);
+      });
+      localStorage.setItem(STORAGE_KEYS.activeTab, tabName);
+    }
+
+    function hydrateControlsFromStatus(data) {
+      const settings = data.settings || {};
+      const effective = data.effective_run_settings || {};
+      const savedLookback = localStorage.getItem(STORAGE_KEYS.lookbackHours);
+      const savedMaxProducts = localStorage.getItem(STORAGE_KEYS.maxProducts);
+      const savedRuleHorizon = localStorage.getItem(STORAGE_KEYS.ruleHorizon);
+      el('lookbackHours').value = savedLookback ?? String(effective.lookback_hours ?? settings.lookback_hours ?? 336);
+      el('maxProducts').value = savedMaxProducts ?? String(effective.max_products ?? settings.top_n_by_volume ?? settings.max_universe_size ?? '');
+      el('ruleHorizon').value = savedRuleHorizon ?? 'h4';
+    }
+
+    function progressPercent(progressText) {
+      if (!progressText || !String(progressText).includes('/')) return 0;
+      const [done, total] = String(progressText).split('/').map(Number);
+      if (!Number.isFinite(done) || !Number.isFinite(total) || total <= 0) return 0;
+      return Math.max(0, Math.min(100, (done / total) * 100));
+    }
+
+    function renderStatusStrip(targetId, steps) {
+      const order = [
+        ['universe_refresh', 'Universe'],
+        ['mapping_refresh', 'Mappings'],
+        ['data_pull', 'Data pull'],
+        ['feature_compute', 'Features'],
+        ['export_build', 'Exports'],
+        ['rule_backtest', 'Rule backtest'],
+      ];
+      const html = order.map(([key, label]) => {
+        const step = steps?.[key] || {};
+        const cls = statusClass(step.status);
+        const text = step.status ? `${label}: ${step.status}` : `${label}: idle`;
+        return `<span class="status-chip ${cls}"><span class="dot"></span>${htmlEscape(text)}</span>`;
+      }).join('');
+      setHtml(targetId, html || '<span class="status-chip"><span class="dot"></span>No status yet</span>');
+    }
+
+    function renderHero(data) {
+      const status = data.status || {};
+      const steps = status.steps || {};
+      const effective = data.effective_run_settings || {};
+      const latestRun = data.latest_run || {};
+      const latestBacktest = data.latest_rule_backtest || {};
+      const pipelineState = ['export_build', 'feature_compute', 'data_pull', 'mapping_refresh', 'universe_refresh']
+        .map(key => steps[key]?.status)
+        .find(Boolean) || 'idle';
+      setText('heroPipelineState', pipelineState);
+      setText('heroRunWindow', `${fmtNum(effective.lookback_hours || data.settings?.lookback_hours)}h · ${fmtNum(effective.max_products || data.settings?.top_n_by_volume || data.settings?.max_universe_size)} products`);
+      setText('heroArtifactState', data.exports?.length ? `${data.exports.length} visible files` : 'No artifacts yet');
+      setText('heroRuleState', `${ruleLibrary.length} rules loaded`);
+      setText('heroModePill', `Mode: ${(data.settings?.mock_mode ? 'mock' : 'live')}`);
+      setText('heroLatestRunPill', `Latest run: ${latestRun.run_id || 'not yet generated'}`);
+      renderStatusStrip('overviewStatusStrip', steps);
+      renderStatusStrip('dataStatusStrip', steps);
+      setText('overviewRunId', latestRun.run_id || '—');
+      setText('overviewBacktestId', latestBacktest.run_id || '—');
+    }
+
+    function latestPipelineHeadline(status) {
+      const steps = status.steps || {};
+      if (steps.rule_backtest?.status === 'running') return 'Backtest in progress — stay on this tab or switch to Backtesting for live feedback.';
+      if (steps.data_pull?.status === 'running') return 'Collection is actively pulling historical data. Wait for features and exports to complete before downloading the next research pack.';
+      if (steps.export_build?.status === 'completed') return 'The latest research pack is ready. Download from Results or run backtests on the current feature table.';
+      if (steps.feature_compute?.status === 'completed' && steps.export_build?.status !== 'completed') return 'Features are ready. Build the research export next so the downloadable artifact pack matches the latest feature table.';
+      if (steps.mapping_refresh?.status === 'completed' && steps.data_pull?.status !== 'completed') return 'Mappings are ready. Pull historical data next.';
+      if (steps.universe_refresh?.status === 'completed' && steps.mapping_refresh?.status !== 'completed') return 'Universe is ready. Refresh symbol mappings next.';
+      return 'Set the collection window, then run the full pipeline for the cleanest operator workflow.';
+    }
+
+    function renderOverviewMetrics(data) {
+      const steps = data.status?.steps || {};
+      const universe = steps.universe_refresh || {};
+      const mappings = steps.mapping_refresh || {};
+      const dataPull = steps.data_pull || {};
+      const features = steps.feature_compute || {};
+      const exports = steps.export_build || {};
+      const metrics = [
+        ['Eligible products', fmtNum(universe.eligible_rows)],
+        ['Mapped products', fmtNum(mappings.mapped_rows)],
+        ['Coinbase bars', fmtNum(dataPull.coinbase_rows)],
+        ['CoinAPI bars', fmtNum(dataPull.coinapi_rows)],
+        ['Feature rows', fmtNum(features.rows)],
+        ['Comparative rows', fmtNum(exports.comparative_report_rows)],
+      ];
+      setHtml('overviewMetrics', metrics.map(([label, value]) => `
+        <div class="metric">
+          <div class="label">${htmlEscape(label)}</div>
+          <div class="value">${htmlEscape(value)}</div>
+        </div>
+      `).join(''));
+      setText('nextActionCallout', latestPipelineHeadline(data.status || {}));
+      const latestRun = data.latest_run || {};
+      const latestBacktest = data.latest_rule_backtest || {};
+      setText('heroLatestRunPill', `Latest run: ${latestRun.run_id || 'not yet generated'}`);
+      setText('overviewRunId', latestRun.run_id || '—');
+      setText('overviewBacktestId', latestBacktest.run_id || '—');
+    }
+
+    function renderPipelineTimeline(status) {
+      const steps = status.steps || {};
+      const rows = [
+        ['Universe refresh', steps.universe_refresh, step => `${fmtNum(step.rows)} rows · ${fmtNum(step.eligible_rows)} eligible`],
+        ['Mapping refresh', steps.mapping_refresh, step => `${fmtNum(step.mapped_rows)} mapped · ${fmtNum(step.unmapped_rows)} unmapped`],
+        ['Data pull', steps.data_pull, step => `${step.progress || '—'} · ${fmtNum(step.coinbase_rows)} Coinbase rows · ${fmtNum(step.coinapi_rows)} CoinAPI rows`],
+        ['Feature compute', steps.feature_compute, step => `${fmtNum(step.rows)} rows · ${fmtNum(step.columns)} columns`],
+        ['Export build', steps.export_build, step => `${fmtNum(step.full_scope_rows)} rows · ${fmtNum(step.comparative_report_rows)} report rows`],
+        ['Rule backtest', steps.rule_backtest, step => `${step.progress || '—'} · ${fmtNum(step.summary_rows_count || step.rows)} result rows`],
+      ];
+      setHtml('pipelineTimeline', rows.map(([label, step, detail]) => {
+        const state = step?.status || 'idle';
+        const message = step?.message || 'No activity yet.';
+        const extra = step?.status ? detail(step || {}) : 'Not run yet.';
+        return `
+          <div class="timeline-row">
+            <div class="timeline-label">${htmlEscape(label)}</div>
+            <div class="timeline-body">
+              <div class="status-chip ${statusClass(state)}"><span class="dot"></span>${htmlEscape(state)}</div>
+              <div class="meta" style="margin-top: 6px;">${htmlEscape(message)}</div>
+              <div class="meta">${htmlEscape(extra)}</div>
+              <div class="meta">Updated: ${htmlEscape(fmtDate(step?.updated_at))}</div>
+            </div>
+          </div>
+        `;
+      }).join(''));
+
+      const dataPull = steps.data_pull || {};
+      const progress = progressPercent(dataPull.progress);
+      el('globalProgressBar').style.width = `${progress}%`;
+      setText('globalProgressLabel', dataPull.status === 'running' ? `Data pull running — ${dataPull.progress || 'starting…'}` : latestPipelineHeadline(status));
+      const detail = dataPull.current_product ? `Current product: ${dataPull.current_product}` : dataPull.start ? `Window: ${fmtDate(dataPull.start)} → ${fmtDate(dataPull.end)}` : '—';
+      setText('globalProgressDetail', detail);
+    }
+
+    function renderDataMetrics(data) {
+      const steps = data.status?.steps || {};
+      const universe = steps.universe_refresh || {};
+      const mappings = steps.mapping_refresh || {};
+      const dataPull = steps.data_pull || {};
+      const features = steps.feature_compute || {};
+      const items = [
+        ['Universe rows', fmtNum(universe.rows)],
+        ['Eligible rows', fmtNum(universe.eligible_rows)],
+        ['Mapped rows', fmtNum(mappings.mapped_rows)],
+        ['Filtered CoinAPI symbols', fmtNum(mappings.filtered_symbol_rows)],
+        ['Pull progress', dataPull.progress || '—'],
+        ['Feature columns', fmtNum(features.columns)],
+      ];
+      setHtml('dataMetrics', items.map(([label, value]) => `
+        <div class="metric">
+          <div class="label">${htmlEscape(label)}</div>
+          <div class="value">${htmlEscape(value)}</div>
+        </div>
+      `).join(''));
+    }
+
+    function renderArtifacts(items, targetId) {
+      if (!items || !items.length) {
+        setHtml(targetId, '<div class="empty-state">No artifacts available yet.</div>');
+        return;
+      }
+      setHtml(targetId, items.map(item => {
+        const href = item.download_url || `/download/${item.name}`;
+        return `
+          <div class="artifact-card">
+            <div>
+              <strong>${htmlEscape(item.name)}</strong>
+              <div class="meta">${htmlEscape(fmtDate(item.modified_at))} · ${htmlEscape(humanBytes(item.size_bytes))}</div>
+            </div>
+            <div class="artifact-actions">
+              <a class="artifact-button" href="${href}">Download</a>
+            </div>
+          </div>
+        `;
+      }).join(''));
+    }
+
+    function renderArtifactTable(items) {
+      const body = items.map(item => {
+        const href = item.download_url || `/download/${item.name}`;
+        return `
+          <tr>
+            <td>${htmlEscape(item.name)}</td>
+            <td>${htmlEscape(fmtDate(item.modified_at))}</td>
+            <td>${htmlEscape(humanBytes(item.size_bytes))}</td>
+            <td><a class="artifact-button secondary" href="${href}">Download</a></td>
+          </tr>
+        `;
+      }).join('');
+      setHtml('artifactTableBody', body || '<tr><td colspan="4">No files yet.</td></tr>');
+    }
+
+    function renderWarnings(data) {
+      const steps = data.status?.steps || {};
+      const warnings = [];
+      Object.entries(steps).forEach(([key, step]) => {
+        if (step?.status === 'failed' && step?.error) {
+          warnings.push({tone: 'danger', title: `${key} failed`, text: step.error});
+        }
+      });
+      if ((data.exports || []).length === 0) warnings.push({tone: 'warning', title: 'No exports visible yet', text: 'Run the full pipeline or build the research export before expecting downloadable artifacts.'});
+      if ((data.latest_rule_backtest?.artifacts || []).length === 0) warnings.push({tone: 'info', title: 'No rule-backtest pack yet', text: 'Run at least one historic backtest to generate rule result packs.'});
+      if (!warnings.length) warnings.push({tone: 'success', title: 'No active warnings', text: 'The app is not currently surfacing any failed steps.'});
+      setHtml('diagnosticWarnings', warnings.map(item => `
+        <div class="callout ${item.tone}" style="margin-bottom: 10px;">
+          <strong>${htmlEscape(item.title)}</strong><br />${htmlEscape(item.text)}
+        </div>
+      `).join(''));
+    }
+
+    function renderSettingsTables(data) {
+      const defaults = data.settings || {};
+      const effective = data.effective_run_settings || {};
+      const latestRun = data.latest_run || {};
+      const latestBacktest = data.latest_rule_backtest || {};
+
+      const renderInfoRows = payload => Object.entries(payload).map(([key, value]) => `
+        <div class="info-row">
+          <div class="meta">${htmlEscape(key)}</div>
+          <div class="value">${htmlEscape(Array.isArray(value) ? value.join(', ') : value == null ? '—' : String(value))}</div>
+        </div>
+      `).join('') || '<div class="empty-state">No values available.</div>';
+
+      setHtml('defaultSettingsTable', renderInfoRows(defaults));
+      setHtml('effectiveSettingsTable', renderInfoRows(effective));
+      setHtml('serviceMetaTable', renderInfoRows({
+        app_version: data.status?.version || INITIAL_BOOT.app_version,
+        latest_run_id: latestRun.run_id || '—',
+        latest_run_generated_at: latestRun.generated_at || '—',
+        latest_backtest_id: latestBacktest.run_id || '—',
+        latest_backtest_generated_at: latestBacktest.generated_at || '—',
+        latest_backtest_horizon: latestBacktest.horizon || '—',
+      }));
+    }
+
+    function updateBacktestProgress(status) {
+      const step = status.steps?.rule_backtest || {};
+      el('ruleProgressBar').style.width = `${progressPercent(step.progress)}%`;
+      const label = step.status === 'running'
+        ? `Backtest running — ${step.progress || 'starting…'}`
+        : step.status === 'completed'
+          ? 'Latest backtest completed.'
+          : step.status === 'failed'
+            ? 'Latest backtest failed.'
+            : 'No backtest running.';
+      setText('ruleProgressLabel', label);
+      setText('ruleProgressDetail', step.message || '—');
+    }
+
+    function renderRuleLibraryPills() {
+      const builtin = ruleLibrary.filter(rule => rule.source_library !== 'custom').length;
+      const custom = ruleLibrary.filter(rule => rule.source_library === 'custom').length;
+      setHtml('ruleLibraryPills', `
+        <span class="pill soft">${ruleLibrary.length} total</span>
+        <span class="pill neutral">${builtin} bundled</span>
+        <span class="pill neutral">${custom} custom</span>
+      `);
+    }
+
+    function currentRuleFilters() {
+      return {
+        search: el('ruleSearch').value.trim().toLowerCase(),
+        source: el('ruleSourceFilter').value,
+        kind: el('ruleKindFilter').value,
+      };
+    }
+
+    function filteredRuleLibrary() {
+      const {search, source, kind} = currentRuleFilters();
+      return ruleLibrary.filter(rule => {
+        const sourceLibrary = rule.source_library === 'custom' ? 'custom' : 'builtin';
+        const ruleKind = rule.rule_kind || 'direct_rule';
+        const haystack = [rule.merged_rule_id || rule.rule_id || rule.test_id, rule.name, rule.family_id, sourceLibrary, ruleKind].join(' ').toLowerCase();
+        if (source !== 'all' && sourceLibrary !== source) return false;
+        if (kind !== 'all' && ruleKind !== kind) return false;
+        if (search && !haystack.includes(search)) return false;
+        return true;
+      });
+    }
+
+    function ruleIdentity(rule) {
+      return rule.merged_rule_id || rule.rule_id || rule.test_id || rule.name;
+    }
+
+    function renderRuleLibrary() {
+      const selected = persistedSelectedRuleIds();
+      const rules = filteredRuleLibrary();
+      const summaryHtml = `
+        <span class="pill soft">${rules.length} visible</span>
+        <span class="pill neutral">${selected.size} selected</span>
+      `;
+      setHtml('ruleLibrarySummary', summaryHtml);
+      if (!rules.length) {
+        setHtml('ruleList', '<div class="empty-state">No rules match the current filters. Try clearing filters or uploading more rules.</div>');
+        renderRulePreview();
+        return;
+      }
+      setHtml('ruleList', rules.map(rule => {
+        const id = ruleIdentity(rule);
+        const selectedClass = selected.has(id) ? 'selected' : '';
+        const sourceClass = rule.source_library === 'custom' ? 'custom' : '';
+        const horizons = (rule.target_horizons || []).join(', ') || rule.target_horizon || rule.recommended_primary_horizon || 'auto';
+        return `
+          <label class="rule-item ${selectedClass}" data-rule-id="${htmlEscape(id)}">
+            <input type="checkbox" class="rule-checkbox" value="${htmlEscape(id)}" ${selected.has(id) ? 'checked' : ''} onchange="saveSelectedRuleIds(); applyRuleSelectionStyling();" />
+            <div>
+              <div class="rule-item-title">
+                <span class="badge ${sourceClass}">${htmlEscape(rule.source_library || 'builtin')}</span>
+                <span class="badge kind">${htmlEscape(rule.rule_kind || 'direct_rule')}</span>
+                <span class="rule-id">${htmlEscape(id)}</span>
+              </div>
+              <div class="rule-name">${htmlEscape(rule.name || 'Untitled rule')}</div>
+              <div class="rule-meta-block">
+                <div>Family: ${htmlEscape(rule.family_id || '—')} · Priority: ${htmlEscape(rule.priority || '—')} · Horizons: ${htmlEscape(horizons)}</div>
+                <div>Source attribution: ${htmlEscape((rule.source_attribution || []).join(', ') || '—')}</div>
+                <div>${htmlEscape(rule.why_interesting || rule.hypothesis || '')}</div>
+              </div>
+            </div>
+          </label>
+        `;
+      }).join(''));
+      applyRuleSelectionStyling();
+      renderRulePreview();
+    }
+
+    function applyRuleSelectionStyling() {
+      document.querySelectorAll('.rule-item').forEach(item => {
+        const checkbox = item.querySelector('.rule-checkbox');
+        item.classList.toggle('selected', !!checkbox?.checked);
+      });
+    }
+
+    function updateRuleSelectionSummary() {
+      const selectedIds = getSelectedRuleIds();
+      if (!selectedIds.length) {
+        setText('selectedRuleSummary', 'No rules selected. Choose one or more rules from the library to backtest them individually, collectively, or both.');
+        return;
+      }
+      const names = selectedIds.slice(0, 3).map(id => ruleLibrary.find(rule => ruleIdentity(rule) === id)?.name || id);
+      const suffix = selectedIds.length > 3 ? ` + ${selectedIds.length - 3} more` : '';
+      setText('selectedRuleSummary', `${selectedIds.length} selected · ${names.join(' · ')}${suffix}`);
+    }
+
+    function updateBacktestConfigSummary() {
+      const selectedIds = getSelectedRuleIds();
+      const horizon = el('ruleHorizon').value;
+      const text = selectedIds.length
+        ? `Selected set: ${selectedIds.length} rule(s) · Horizon: ${horizon}. Choose an individual, collective, or combined run mode below.`
+        : `No selected rules yet. Horizon: ${horizon}. You can still test the full library from this tab.`;
+      setText('backtestConfigSummary', text);
+    }
+
+    function renderRulePreview() {
+      const selectedIds = getSelectedRuleIds();
+      const target = el('rulePreviewContent');
+      if (!selectedIds.length) {
+        target.className = 'empty-state';
+        target.textContent = 'Select a rule to inspect its structure, source attribution, and notes.';
+        return;
+      }
+      const rule = ruleLibrary.find(item => ruleIdentity(item) === selectedIds[0]);
+      if (!rule) {
+        target.className = 'empty-state';
+        target.textContent = 'Selected rule could not be found in the current library.';
+        return;
+      }
+      target.className = '';
+      const checks = (rule.required_checks || []).map(check => `<li>${htmlEscape(check)}</li>`).join('');
+      target.innerHTML = `
+        <div class="subgrid">
+          <div><strong>${htmlEscape(rule.name || 'Untitled rule')}</strong></div>
+          <div class="meta">${htmlEscape(ruleIdentity(rule))} · ${htmlEscape(rule.rule_kind || 'direct_rule')}</div>
+          <div class="meta">Source attribution: ${htmlEscape((rule.source_attribution || []).join(', ') || '—')}</div>
+          <div>${htmlEscape(rule.hypothesis || rule.why_interesting || 'No description available.')}</div>
+          <div class="meta">Primary horizon: ${htmlEscape(rule.recommended_primary_horizon || rule.target_horizon || (rule.target_horizons || []).join(', ') || 'auto')}</div>
+          ${checks ? `<div><strong>Required checks</strong><ul style="margin:8px 0 0 18px; color: var(--muted);">${checks}</ul></div>` : ''}
+        </div>
+      `;
+    }
+
+    function selectVisibleRules() {
+      document.querySelectorAll('.rule-checkbox').forEach(box => { box.checked = true; });
+      saveSelectedRuleIds();
+      applyRuleSelectionStyling();
+    }
+
+    function clearRuleSelection() {
+      document.querySelectorAll('.rule-checkbox').forEach(box => { box.checked = false; });
+      saveSelectedRuleIds();
+      applyRuleSelectionStyling();
+    }
+
+    function copySelectedRuleIds() {
+      const selectedIds = getSelectedRuleIds();
+      if (!selectedIds.length) {
+        setMessage('ruleUploadBox', 'No selected rules to copy.');
+        switchTab('rules');
+        return;
+      }
+      navigator.clipboard?.writeText(selectedIds.join('\n'));
+      setMessage('ruleUploadBox', `Copied ${selectedIds.length} selected rule IDs.`);
+      switchTab('rules');
+    }
+
+    function renderRuleResults(rows) {
+      const body = rows.map(row => `
+        <tr>
+          <td>${htmlEscape(row.rule_instance_id || row.rule_name)}</td>
+          <td>${htmlEscape(row.status)}</td>
+          <td>${htmlEscape(row.source_library || '')}</td>
+          <td>${htmlEscape(fmtNum(row.support_rows))}</td>
+          <td>${htmlEscape(fmtNum(row.distinct_products))}</td>
+          <td>${row.largest_product_share == null ? '—' : Number(row.largest_product_share).toFixed(3)}</td>
+          <td>${row.candidate_mean_forward_return == null ? '—' : Number(row.candidate_mean_forward_return).toFixed(4)}</td>
+          <td>${row.candidate_touch_rate == null ? '—' : Number(row.candidate_touch_rate).toFixed(4)}</td>
+          <td>${row.absolute_uplift_in_touch_rate == null ? '—' : Number(row.absolute_uplift_in_touch_rate).toFixed(4)}</td>
+          <td>${htmlEscape(row.target_horizon)}</td>
+        </tr>
+      `).join('');
+      setHtml('ruleBacktestTableBody', body || '<tr><td colspan="10">No backtest rows yet.</td></tr>');
+      if (!rows.length) {
+        setHtml('backtestResultSummary', '<span class="pill neutral">No result rows yet</span>');
+        return;
+      }
+      const completed = rows.filter(row => row.status === 'completed').length;
+      const positiveUplift = rows.filter(row => Number(row.absolute_uplift_in_touch_rate || 0) > 0).length;
+      setHtml('backtestResultSummary', `
+        <span class="pill soft">${rows.length} rows</span>
+        <span class="pill neutral">${completed} completed</span>
+        <span class="pill neutral">${positiveUplift} positive uplift</span>
+      `);
+    }
+
+    function renderResultsSections(data) {
+      renderArtifacts(data.exports || [], 'resultsRunArtifacts');
+      renderArtifacts(data.latest_rule_backtest?.artifacts || [], 'latestRuleBacktestArtifacts');
+      renderArtifacts(data.exports || [], 'overviewLatestArtifacts');
+      renderArtifactTable(data.exports || []);
+      setMessage('diagnosticBacktestJson', JSON.stringify(data.latest_rule_backtest || {}, null, 2));
+    }
+
+    function loadInitialRuleLibrary() {
+      renderRuleLibraryPills();
+      renderRuleLibrary();
+      updateRuleSelectionSummary();
+      updateBacktestConfigSummary();
+    }
+
+    async function refreshStatus(preserveTab = false) {
+      const activeTab = localStorage.getItem(STORAGE_KEYS.activeTab) || 'overview';
+      const response = await fetch('/api/status');
+      const data = await response.json();
+      currentStatusData = data;
+      hydrateControlsFromStatus(data);
+      renderHero(data);
+      renderOverviewMetrics(data);
+      renderPipelineTimeline(data.status || {});
+      renderDataMetrics(data);
+      renderResultsSections(data);
+      renderWarnings(data);
+      renderSettingsTables(data);
+      updateBacktestProgress(data.status || {});
+      setMessage('statusBox', JSON.stringify(data, null, 2));
+      setMessage('diagnosticStatusJson', JSON.stringify(data, null, 2));
+      if (!preserveTab) switchTab(activeTab);
+    }
+
+    async function postJson(url, payload, onSuccessTab = null) {
+      persistControls();
+      startPolling();
+      setMessage('statusBox', `started → ${url}\n` + JSON.stringify(payload, null, 2));
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+      setMessage('statusBox', `${response.ok ? 'completed' : 'failed'} → ${url}\n` + JSON.stringify(data, null, 2));
+      await refreshStatus(true);
+      stopPolling();
+      if (onSuccessTab) switchTab(onSuccessTab);
+      return {response, data};
+    }
+
+    function getPullPayload() {
+      const lookback_hours = parseOptionalNumber(el('lookbackHours').value);
+      const max_products = parseOptionalNumber(el('maxProducts').value);
+      const payload = {};
+      if (lookback_hours !== null) payload.lookback_hours = lookback_hours;
+      if (max_products !== null) payload.max_products = max_products;
+      return payload;
+    }
+
+    async function pullHistoricalData() {
+      switchTab('data');
+      await postJson('/api/data/pull', getPullPayload(), 'data');
+    }
+
+    async function runConfiguredPipeline() {
+      switchTab('data');
+      await postJson('/api/pipeline/run', {...getPullPayload(), compress_chatgpt_csv: true}, 'results');
+    }
+
+    async function fetchPreview(url, targetId = 'reportBox', nextTab = null) {
+      const response = await fetch(url);
+      const data = await response.json();
+      setMessage(targetId, JSON.stringify(data, null, 2));
+      if (nextTab) switchTab(nextTab);
+    }
+
+    async function loadRuleLibrary(preserveTab = false) {
+      const activeTab = localStorage.getItem(STORAGE_KEYS.activeTab) || 'rules';
+      const response = await fetch('/api/rule-backtests/library');
+      const data = await response.json();
+      ruleLibrary = data.rules || [];
+      renderRuleLibraryPills();
+      renderRuleLibrary();
+      updateRuleSelectionSummary();
+      updateBacktestConfigSummary();
+      if (!preserveTab) switchTab(activeTab);
+    }
+
+    function clearRuleUploadInputs() {
+      el('ruleJsonFiles').value = '';
+      el('ruleJsonPaste').value = '';
+      setMessage('ruleUploadBox', 'Upload inputs cleared.');
+    }
+
+    async function uploadRuleLibraryJson() {
+      const fileInput = el('ruleJsonFiles');
+      const pasted = el('ruleJsonPaste').value.trim();
+      if ((!fileInput.files || fileInput.files.length === 0) && !pasted) {
+        setMessage('ruleUploadBox', 'Choose at least one JSON file or paste JSON first.');
+        switchTab('rules');
+        return;
+      }
+      const formData = new FormData();
+      Array.from(fileInput.files || []).forEach(file => formData.append('files', file));
+      if (pasted) formData.append('pasted_json', pasted);
+      setMessage('ruleUploadBox', 'Uploading and saving rule JSON…');
+      const response = await fetch('/api/rule-backtests/library/upload', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await response.json();
+      setMessage('ruleUploadBox', JSON.stringify(data, null, 2));
+      if (response.ok) {
+        clearRuleUploadInputs();
+        await loadRuleLibrary(true);
+        await refreshStatus(true);
+      }
+      switchTab('rules');
+    }
+
+    async function runRuleBacktests(selectionMode, runMode) {
+      persistControls();
+      const payload = {
+        selection_mode: selectionMode,
+        run_mode: runMode,
+        horizon: el('ruleHorizon').value,
+        rule_ids: selectionMode === 'selected' ? getSelectedRuleIds() : []
+      };
+      if (selectionMode === 'selected' && payload.rule_ids.length === 0) {
+        setMessage('ruleBacktestBox', 'Select at least one rule first.');
+        switchTab('rules');
+        return;
+      }
+      switchTab('backtesting');
+      startPolling();
+      setMessage('ruleBacktestBox', 'Backtest started…');
+      const response = await fetch('/api/rule-backtests/run', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+      stopPolling();
+      lastRuleBacktestResponse = data;
+      setMessage('ruleBacktestBox', JSON.stringify(data, null, 2));
+      renderRuleResults(data.summary_rows || []);
+      const artifacts = [data.summary_artifact, data.pack_artifact, ...(data.detail_artifacts || [])].filter(Boolean);
+      renderArtifacts(artifacts, 'ruleBacktestArtifacts');
+      await refreshStatus(true);
+    }
+
+    async function runRule() {
+      switchTab('diagnostics');
+      await postJson('/api/rule-eval/run', {
+        rule_name: 'sample_momentum_rule',
+        conditions: [
+          {feature: 'cb_ret_3', operator: '>', value: 0},
+          {feature: 'cb_rel_volume_short', operator: '>', value: 1},
+          {feature: 'cb_sma_5_dist', operator: '>', value: -0.01}
+        ],
+        scopes: ['coinbase_only', 'coinbase_plus_coinapi', 'full_scope'],
+        target_column: 'future_close_return_h4'
+      }, 'diagnostics');
+    }
+
+    function startPolling() {
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = setInterval(() => refreshStatus(true), 2000);
+    }
+
+    function stopPolling() {
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = null;
+    }
+
+    ['lookbackHours', 'maxProducts', 'ruleHorizon'].forEach(id => {
+      el(id).addEventListener('change', () => {
+        persistControls();
+        updateBacktestConfigSummary();
+      });
+    });
+    ['ruleSearch', 'ruleSourceFilter', 'ruleKindFilter'].forEach(id => {
+      el(id).addEventListener('input', renderRuleLibrary);
+      el(id).addEventListener('change', renderRuleLibrary);
+    });
+
+    hydrateControlsFromStatus(currentStatusData);
+    loadInitialRuleLibrary();
+    renderHero(currentStatusData);
+    renderOverviewMetrics(currentStatusData);
+    renderPipelineTimeline(currentStatusData.status || {});
+    renderDataMetrics(currentStatusData);
+    renderResultsSections(currentStatusData);
+    renderWarnings(currentStatusData);
+    renderSettingsTables(currentStatusData);
+    updateBacktestProgress(currentStatusData.status || {});
+    setMessage('statusBox', JSON.stringify(currentStatusData, null, 2));
+    setMessage('diagnosticStatusJson', JSON.stringify(currentStatusData, null, 2));
+    setMessage('diagnosticBacktestJson', JSON.stringify(currentStatusData.latest_rule_backtest || {}, null, 2));
+    switchTab(localStorage.getItem(STORAGE_KEYS.activeTab) || 'overview');
+    refreshStatus(true);
+  </script>
+</body>
+</html>

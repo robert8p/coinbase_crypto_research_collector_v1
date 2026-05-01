@@ -1,0 +1,506 @@
+{
+  "artifact_type": "merged_rule_validation_prompt",
+  "schema_version": "1.0",
+  "title": "Merged Coinbase/CoinAPI Crypto Rule Validation Prompt",
+  "intended_consumer": "historical rule-testing or replay-validation app",
+  "created_utc": "2026-04-30T00:00:00Z",
+  "sources_merged": [
+    {
+      "name": "coinbase_coinapi_rule_validation_prompt.json",
+      "role": "assistant-derived candidate rules from direct pack analysis"
+    },
+    {
+      "name": "coinapi_claude_findings_validation_prompt.json",
+      "role": "Claude-derived candidate rules from synthesis document"
+    }
+  ],
+  "master_prompt": "You are validating candidate crypto pattern rules derived from a Coinbase/CoinAPI research workflow.\n\nPRIMARY OBJECTIVE\n\nDetermine whether each candidate rule is a credible, repeatable, practically useful predictor of upward price movement, with emphasis on:\n1. non-obvious or underexploited structure\n2. robustness across many symbols rather than a few outliers\n3. sufficient support size\n4. explainability\n5. replay-testability on Coinbase-native candles\n\nTHIS IS NOT:\n- a live trading task\n- an execution task\n- a generic summary task\n- a black-box modelling task\n\nThis is a rule-validation workflow.\n\nCRITICAL SOURCE-DISCIPLINE\n\nDo not blend all features together and simply say “the data says X”.\nPreserve source attribution and explicitly classify each rule as one of:\n- Coinbase-native features only\n- CoinAPI-enriched features\n- cross-source divergence features\n- broader context features\n- combinations of the above\n\nYou must actively assess whether CoinAPI-derived insight is:\n- additive\n- redundant\n- noisy\n- conditionally useful\n\nIMPORTANT STRATEGIC FINDING TO TEST, NOT ASSUME\n\nThe strongest claimed additive value from CoinAPI is not in ca_* mapped twins.\nThe strongest claimed additive value is in:\n- cs_* cross-source divergence\n- cx_* broader regime/context\n- sign-aware and horizon-aware Coinbase-versus-cross-venue mispricing\n\nVALIDATION STANDARD\n\nFor each candidate rule:\n1. Test the exact hypothesis as written.\n2. Report support size, number of distinct products, and concentration risk.\n3. Compare against its intended base condition or relevant baseline, not only against the global dataset.\n4. Check whether uplift persists across many symbols, not just aggregate rows.\n5. Check whether the rule is likely just a generic momentum, volatility, or drift effect in disguise.\n6. Check whether the rule still looks useful when simplified into a replay-testable form using Coinbase-native candles and any allowed contextual features.\n7. Reject fragile findings driven by thin-history assets, stale assets, mapping artefacts, very small samples, timing leaks, or period-specific distortions.\n8. Preserve horizon specificity. Do not treat a short-horizon rule as if it were a longer-horizon continuation rule.\n9. Where two rules are overlapping expressions of the same phenomenon, compare threshold form versus ranking form and recommend the simpler or stronger implementation.\n\nREQUIRED OUTPUT FORMAT\n\nFor each rule, output:\n- Rule ID\n- Rule name\n- Hypothesis\n- Source attribution\n- Exact test definition used\n- Base condition or baseline used\n- Candidate condition\n- Support rows\n- Distinct products\n- Largest product share\n- Target horizon\n- Base touch rate\n- Candidate touch rate\n- Absolute uplift in touch rate\n- Mean forward return change\n- Median per-product uplift if available\n- Time-split or subperiod stability verdict if available\n- Concentration verdict\n- Robustness verdict\n- Novelty verdict\n- Whether CoinAPI contribution appears additive, redundant, noisy, or conditional\n- Whether the rule should be promoted, refined, ranked, or rejected\n- Simplest replay-testable implementation suggestion\n\nDECISION PRINCIPLES\n\nBias toward:\n- non-obvious conditional interactions\n- source-differential signals\n- regime-specific asymmetries\n- rules with decent support size\n- explainable rules\n- rules that can later be replay-tested on Coinbase candles\n\nBias against:\n- fragile one-off curiosities\n- tiny support\n- single-coin accidents\n- edges that are just generic “trend up then more up”\n- edges that vanish once Coinbase-only features already explain them\n- ca_*-only rules that simply restate cb_* twins\n\nFinal output should rank the candidate rules from strongest to weakest based on:\n- robustness\n- novelty\n- practical usefulness\n- support size\n- replay-testability\n",
+  "analysis_context": {
+    "run_id": "20260430T160547Z",
+    "assumed_run_metadata": {
+      "app_version": "v1.0.9",
+      "lookback_hours": 720,
+      "max_products": 150,
+      "quote_currency": "USD",
+      "bar_granularity": "1 hour",
+      "feature_rows_approx": 102056,
+      "label_assumption": "strict future-horizon labels intended to be correct"
+    },
+    "merged_thesis_to_test": [
+      "CoinAPI is mostly redundant at the mapped-twin ca_* level.",
+      "CoinAPI is most additive through cs_* cross-source divergence and cx_* regime/context features.",
+      "The most interesting edge family is Coinbase-versus-cross-venue disagreement, especially when Coinbase looks neutral, weak, or behind.",
+      "Some divergence signals may be better as continuous ranking features than hard thresholds.",
+      "Broader context such as BTC regime and liquidity bucket may materially alter the usefulness of otherwise ordinary Coinbase setups."
+    ]
+  },
+  "rule_families": [
+    {
+      "family_id": "FAMILY_1",
+      "family_name": "Cross-source divergence catch-up",
+      "description": "Coinbase appears weaker or more neutral than the broader cross-venue picture, then catches up upward."
+    },
+    {
+      "family_id": "FAMILY_2",
+      "family_name": "Signed divergence with horizon asymmetry",
+      "description": "The sign of Coinbase-versus-cross-venue divergence may determine whether the effect is short-horizon catch-up or longer-horizon continuation."
+    },
+    {
+      "family_id": "FAMILY_3",
+      "family_name": "Context-conditional continuation",
+      "description": "Broader BTC/ETH regime or liquidity context modifies otherwise generic Coinbase strength or volatility setups."
+    },
+    {
+      "family_id": "FAMILY_4",
+      "family_name": "Compressed mispricing resolution",
+      "description": "Short-horizon moves triggered by compression plus divergence that fade by longer horizons."
+    }
+  ],
+  "candidate_rules": [
+    {
+      "merged_rule_id": "MERGED_RULE_001",
+      "name": "Coinbase trailing while cross-venue leads on the same 1h bar",
+      "priority": 1,
+      "family_id": "FAMILY_1",
+      "dedupes": [
+        "CLAUDE_RULE_A",
+        "CRYPTO_RULE_003 (conceptually related)",
+        "CRYPTO_RULE_004 (narrow variant)"
+      ],
+      "hypothesis": "When Coinbase 1h return is weak but CoinAPI cross-venue 1h return is strong over the same interval, Coinbase is trailing the broader market and tends to catch up upward.",
+      "source_attribution": [
+        "Coinbase-native features",
+        "CoinAPI-enriched features",
+        "cross-source divergence features"
+      ],
+      "exact_definition": {
+        "all_conditions": [
+          {
+            "field": "cb_ret_1",
+            "logic": "in_bottom_quantile",
+            "quantile": 0.2
+          },
+          {
+            "field": "ca_ret_1",
+            "logic": "in_top_quantile",
+            "quantile": 0.2
+          }
+        ]
+      },
+      "target_horizon": "primary_h4_secondary_h24",
+      "reported_support": {
+        "rows": 223,
+        "distinct_symbols": 39,
+        "top_symbol_share": 0.135
+      },
+      "why_interesting": "This is the clearest non-obvious divergence rule and cannot be built from Coinbase-only twins.",
+      "required_checks": [
+        "Audit timing leakage and bar alignment carefully.",
+        "Check top-symbol removal and symbol breadth.",
+        "Check liquidity-tier dependence.",
+        "Confirm replay validity on Coinbase-native execution bars."
+      ]
+    },
+    {
+      "merged_rule_id": "MERGED_RULE_002",
+      "name": "Extreme negative cross-source return divergence as a ranking feature",
+      "priority": 2,
+      "family_id": "FAMILY_1",
+      "dedupes": [
+        "CLAUDE_RULE_B"
+      ],
+      "hypothesis": "The more extreme the negative Coinbase-versus-CoinAPI return divergence, the stronger the short-horizon catch-up edge.",
+      "source_attribution": [
+        "cross-source divergence features"
+      ],
+      "exact_definition": {
+        "field": "cs_coinbase_vs_coinapi_return_diff",
+        "logic": "in_bottom_quantile",
+        "quantiles_to_test": [
+          0.01,
+          0.05,
+          0.1
+        ]
+      },
+      "target_horizon": "primary_h4_secondary_h24",
+      "why_interesting": "This is the continuous, ranking-first form of the catch-up phenomenon and may outperform hard threshold rules.",
+      "required_checks": [
+        "Test monotonicity across more extreme negative divergence buckets.",
+        "Compare ranking implementation versus threshold implementation.",
+        "Measure orthogonality against common Coinbase momentum rules."
+      ]
+    },
+    {
+      "merged_rule_id": "MERGED_RULE_003",
+      "name": "Neutral Coinbase 24h momentum with positive external short-trend lead",
+      "priority": 3,
+      "family_id": "FAMILY_1",
+      "dedupes": [
+        "CRYPTO_RULE_001"
+      ],
+      "hypothesis": "When Coinbase 24h momentum is roughly neutral but external short-trend positioning is materially stronger than Coinbase, the coin is more likely to move upward.",
+      "source_attribution": [
+        "Coinbase-native features",
+        "cross-source divergence features"
+      ],
+      "exact_definition": {
+        "all_conditions": [
+          {
+            "field": "cb_ret_24",
+            "logic": "between",
+            "lower_bound": -0.0083,
+            "upper_bound": 0.0074,
+            "units": "fraction_return"
+          },
+          {
+            "field": "cs_sma_5_dist_delta",
+            "logic": ">= empirical_top_decile_threshold"
+          }
+        ]
+      },
+      "target_horizon": "primary_h4",
+      "why_interesting": "Tests whether divergence can rescue otherwise forgettable neutral Coinbase rows.",
+      "required_checks": [
+        "Compare against neutral 24h Coinbase rows only.",
+        "Check breadth across symbols.",
+        "Check whether this simply proxies Rule 2 or adds distinct signal."
+      ]
+    },
+    {
+      "merged_rule_id": "MERGED_RULE_004",
+      "name": "Neutral Coinbase 6h momentum with positive external short-trend lead",
+      "priority": 4,
+      "family_id": "FAMILY_1",
+      "dedupes": [
+        "CRYPTO_RULE_002"
+      ],
+      "hypothesis": "When Coinbase 6h momentum is flat but external short-trend positioning is materially stronger than Coinbase, upside probability increases meaningfully.",
+      "source_attribution": [
+        "Coinbase-native features",
+        "cross-source divergence features"
+      ],
+      "exact_definition": {
+        "all_conditions": [
+          {
+            "field": "cb_ret_6",
+            "logic": "between",
+            "lower_bound": -0.0038,
+            "upper_bound": 0.003,
+            "units": "fraction_return"
+          },
+          {
+            "field": "cs_sma_5_dist_delta",
+            "logic": ">= empirical_top_decile_threshold"
+          }
+        ]
+      },
+      "target_horizon": "primary_h4",
+      "why_interesting": "A shorter neutral-state version of the same hidden-strength concept.",
+      "required_checks": [
+        "Compare against neutral 6h Coinbase rows only.",
+        "Check relation to short-horizon return divergence family."
+      ]
+    },
+    {
+      "merged_rule_id": "MERGED_RULE_005",
+      "name": "Coinbase pullback contradicted by cross-source divergence",
+      "priority": 5,
+      "family_id": "FAMILY_1",
+      "dedupes": [
+        "CRYPTO_RULE_003"
+      ],
+      "hypothesis": "A Coinbase-local pullback is more likely to reverse upward when broader market behaviour diverges positively from Coinbase.",
+      "source_attribution": [
+        "Coinbase-native features",
+        "cross-source divergence features"
+      ],
+      "exact_definition": {
+        "all_conditions": [
+          {
+            "field": "cb_breakout_distance_short",
+            "logic": "<=",
+            "threshold_type": "empirical_q20"
+          },
+          {
+            "field": "cs_cross_source_divergence_flag",
+            "logic": "==",
+            "value": 1
+          }
+        ]
+      },
+      "target_horizon": "primary_h4_secondary_h24",
+      "why_interesting": "Local Coinbase weakness may be non-confirmed by the broader market and therefore reversible.",
+      "required_checks": [
+        "Compare against pullback-only baseline.",
+        "Check whether this is just generic dip-buying or truly divergence-additive."
+      ]
+    },
+    {
+      "merged_rule_id": "MERGED_RULE_006",
+      "name": "Coinbase pullback with CoinAPI 1h thrust",
+      "priority": 6,
+      "family_id": "FAMILY_1",
+      "dedupes": [
+        "CRYPTO_RULE_004"
+      ],
+      "hypothesis": "A Coinbase pullback becomes a stronger bullish setup when CoinAPI shows top-decile 1h strength, indicating broader-market thrust against local Coinbase weakness.",
+      "source_attribution": [
+        "Coinbase-native features",
+        "CoinAPI-enriched features"
+      ],
+      "exact_definition": {
+        "all_conditions": [
+          {
+            "field": "cb_breakout_distance_short",
+            "logic": "<=",
+            "threshold_type": "empirical_q20"
+          },
+          {
+            "field": "ca_ret_1",
+            "logic": ">= empirical_top_decile_threshold"
+          }
+        ]
+      },
+      "target_horizon": "primary_h4",
+      "why_interesting": "A narrower, more aggressive variant of local dislocation catch-up.",
+      "required_checks": [
+        "Compare against pullback-only baseline.",
+        "Check whether Coinbase 1h proxies can already explain the effect."
+      ]
+    },
+    {
+      "merged_rule_id": "MERGED_RULE_007",
+      "name": "Coinbase leading while cross-venue lags",
+      "priority": 7,
+      "family_id": "FAMILY_2",
+      "dedupes": [
+        "CLAUDE_RULE_MIRROR"
+      ],
+      "hypothesis": "When Coinbase leads the broader market rather than trailing it, the effect may be weaker at h4 but continue over h24 with a different time profile.",
+      "source_attribution": [
+        "Coinbase-native features",
+        "CoinAPI-enriched features",
+        "cross-source divergence features"
+      ],
+      "exact_definition": {
+        "all_conditions": [
+          {
+            "field": "cb_ret_1",
+            "logic": "in_top_quantile",
+            "quantile": 0.2
+          },
+          {
+            "field": "ca_ret_1",
+            "logic": "in_bottom_quantile",
+            "quantile": 0.2
+          }
+        ]
+      },
+      "target_horizon": "primary_h24_secondary_h4",
+      "why_interesting": "Suggests divergence sign may change the best horizon rather than simply flipping edge direction.",
+      "required_checks": [
+        "Validate sign-aware horizon claim.",
+        "Compare symbol overlap versus MERGED_RULE_001.",
+        "Test whether one signed divergence ranking is better than separate threshold rules."
+      ]
+    },
+    {
+      "merged_rule_id": "MERGED_RULE_008",
+      "name": "Compression plus cross-source mispricing",
+      "priority": 8,
+      "family_id": "FAMILY_4",
+      "dedupes": [
+        "CLAUDE_RULE_C"
+      ],
+      "hypothesis": "A compressed Coinbase setup with extreme negative cross-source close divergence resolves quickly upward but does not persist over longer horizons.",
+      "source_attribution": [
+        "Coinbase-native features",
+        "cross-source divergence features"
+      ],
+      "exact_definition": {
+        "all_conditions": [
+          {
+            "field": "cs_close_diff",
+            "logic": "in_bottom_quantile",
+            "quantile": 0.05
+          },
+          {
+            "field": "cb_breakout_short",
+            "logic": "in_bottom_quantile",
+            "quantile": 0.1
+          }
+        ]
+      },
+      "target_horizon": "strictly_h4_biased",
+      "why_interesting": "A clean short-horizon-only mispricing resolution setup.",
+      "required_checks": [
+        "Do not treat as a 24h continuation rule.",
+        "Validate that h24 collapses toward baseline."
+      ]
+    },
+    {
+      "merged_rule_id": "MERGED_RULE_009",
+      "name": "Strong coin while BTC regime is down",
+      "priority": 9,
+      "family_id": "FAMILY_3",
+      "dedupes": [
+        "CRYPTO_RULE_005",
+        "CLAUDE_RULE_D"
+      ],
+      "hypothesis": "Coins already showing strength may continue upward when BTC is in a bearish regime, indicating regime-conditional relative-strength asymmetry.",
+      "source_attribution": [
+        "Coinbase-native features",
+        "broader context features"
+      ],
+      "exact_definition_variants": [
+        {
+          "variant_id": "A",
+          "all_conditions": [
+            {
+              "field": "cb_ret_24",
+              "logic": ">=",
+              "threshold_type": "empirical_q80",
+              "approx_threshold": 0.0327
+            },
+            {
+              "field": "cx_btc_regime_flag",
+              "logic": "==",
+              "value": -1
+            }
+          ]
+        },
+        {
+          "variant_id": "B",
+          "all_conditions": [
+            {
+              "field": "cb_sma_20_dist",
+              "logic": "in_top_quantile",
+              "quantile": 0.1
+            },
+            {
+              "field": "cx_btc",
+              "logic": "==",
+              "value": -1
+            }
+          ]
+        }
+      ],
+      "target_horizon": "primary_h24_secondary_h4",
+      "why_interesting": "Challenges naive crypto folklore and has broad support if real.",
+      "required_checks": [
+        "Validate across multiple regime windows.",
+        "Compare variant A versus variant B directly.",
+        "Check whether sign and ordering survive longer lookback expansion."
+      ]
+    },
+    {
+      "merged_rule_id": "MERGED_RULE_010",
+      "name": "High Coinbase volatility in medium CoinAPI liquidity bucket",
+      "priority": 10,
+      "family_id": "FAMILY_3",
+      "dedupes": [
+        "CRYPTO_RULE_006"
+      ],
+      "hypothesis": "High-volatility Coinbase setups perform best in the medium-liquidity zone, rather than in micro or largest-liquidity buckets.",
+      "source_attribution": [
+        "Coinbase-native features",
+        "CoinAPI-enriched features",
+        "broader context features"
+      ],
+      "exact_definition": {
+        "all_conditions": [
+          {
+            "field": "cb_realized_vol_medium",
+            "logic": ">=",
+            "threshold_type": "empirical_q80"
+          },
+          {
+            "field": "ca_liquidity_bucket",
+            "logic": "==",
+            "value": "medium"
+          }
+        ]
+      },
+      "target_horizon": "primary_h4_secondary_h24",
+      "why_interesting": "Tests a liquidity sweet spot rather than a simplistic more-liquidity-is-better claim.",
+      "required_checks": [
+        "Compare medium versus micro versus large on the same high-volatility base.",
+        "Verify not driven by thin-history or stale assets."
+      ]
+    }
+  ],
+  "orthogonality_and_ablation_tests": [
+    {
+      "test_id": "TEST_001",
+      "name": "Compare against common Coinbase momentum rule",
+      "definition": {
+        "all_conditions": [
+          {
+            "field": "cb_ret_3",
+            "logic": ">",
+            "value": 0
+          },
+          {
+            "field": "cb_rel_volume_short",
+            "logic": ">",
+            "value": 1
+          },
+          {
+            "field": "cb_sma_5_dist",
+            "logic": ">",
+            "value": -0.01
+          }
+        ]
+      },
+      "required_checks": [
+        "Measure overlap versus MERGED_RULE_001 and MERGED_RULE_002.",
+        "Quantify edge of divergence rows outside the Coinbase momentum rule.",
+        "Decide whether cross-source divergence is genuinely orthogonal or merely a stronger restatement."
+      ]
+    },
+    {
+      "test_id": "TEST_002",
+      "name": "CoinAPI family ablation",
+      "required_checks": [
+        "Drop ca_* mapped twins and compare performance or rule stability.",
+        "Retain cs_* and cx_* to test whether most additive value remains."
+      ]
+    },
+    {
+      "test_id": "TEST_003",
+      "name": "Timing-leak audit for cs rules",
+      "required_checks": [
+        "Confirm same-bar cs divergence uses only information observable at bar close.",
+        "Audit bar alignment gaps on all MERGED_RULE_001 and MERGED_RULE_002 hits.",
+        "Reject or downgrade any rule whose edge depends on timing leakage."
+      ]
+    }
+  ],
+  "global_caveats": [
+    "This run reflects a relatively short positive-drift window; magnitudes may compress on longer lookbacks even if signs survive.",
+    "Mapping-artifact symbols must remain excluded from cs analyses unless mappings are revalidated.",
+    "Stale zero-volume products should not contaminate replay or validation.",
+    "Bar-alignment gaps must be audited wherever same-hour Coinbase versus CoinAPI comparisons are used.",
+    "If strict future-horizon labels are off by one bar, all reported excess-return metrics may be distorted.",
+    "High-ranking ca_*-only rules should be treated as suspect unless they prove incremental value beyond cb_* twins."
+  ],
+  "priority_experiments": [
+    "Replay MERGED_RULE_001 and MERGED_RULE_002 using Coinbase-native execution bars while retaining cs-based selection logic.",
+    "Audit timing and alignment for all cs-derived rules before trusting magnitude.",
+    "Extend lookback to at least 90 to 180 days and re-run rule ordering, regime tables, and orthogonality checks.",
+    "Test signed-divergence ranking: negative divergence for shorter horizon, positive divergence for longer horizon.",
+    "Validate MERGED_RULE_009 across multiple BTC regime periods.",
+    "Run ca_* ablation to confirm redundancy claim end-to-end."
+  ],
+  "global_instructions": {
+    "use_empirical_thresholds_from_dataset": true,
+    "avoid_single_symbol_conclusions": true,
+    "report_concentration_metrics": true,
+    "preserve_horizon_specificity": true,
+    "require_base_vs_candidate_comparisons": true,
+    "require_coinapi_value_judgment": true,
+    "require_replay_testability_comment": true,
+    "require_timing_leak_audit_for_cs_rules": true,
+    "compare_threshold_form_vs_ranking_form_for_overlapping_rules": true
+  }
+}

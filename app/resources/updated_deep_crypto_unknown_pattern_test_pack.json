@@ -1,0 +1,410 @@
+{
+  "artifact_type": "updated_deep_pattern_test_pack",
+  "schema_version": "1.0",
+  "title": "Updated Crypto Unknown-Pattern Test Pack with Decay and Routing",
+  "intended_consumer": "historical rule-testing or replay-validation app",
+  "created_utc": "2026-05-01T00:00:00Z",
+  "source_basis": {
+    "base_pack": "deep_crypto_unknown_pattern_test_pack.json",
+    "addendum": "coinapi_pattern_discovery_synthesis_v1_addendum.md",
+    "purpose_of_update": "Incorporate temporal clustering, decay-curve, horizon stability, and fast-vs-slow routing implications for Rule A and Rule B."
+  },
+  "master_prompt": "You are validating candidate crypto pattern rules discovered from a Coinbase/CoinAPI research workflow.\n\nPRIMARY OBJECTIVE\n\nDetermine whether each candidate rule is a credible, repeatable, practically useful predictor of upward price movement over 1H, 4H, and 24H horizons, with emphasis on:\n1. non-obvious or underexploited structure\n2. robustness across many symbols rather than a few outliers\n3. sufficient support size\n4. explainability\n5. replay-testability on Coinbase-native candles\n6. execution-shape realism, including decay profile and exit suitability\n\nTHIS IS NOT:\n- a live trading task\n- an execution task\n- a generic summary task\n- a black-box modelling task\n\nThis is a rule-validation workflow.\n\nCRITICAL SOURCE-DISCIPLINE\n\nDo not blend all features together and simply say \"the data says X\".\nPreserve source attribution and explicitly classify each rule as one of:\n- Coinbase-native features only\n- CoinAPI-enriched features\n- cross-source divergence features\n- broader context features\n- combinations of the above\n\nYou must actively assess whether CoinAPI-derived insight is:\n- additive\n- redundant\n- noisy\n- conditionally useful\n\nIMPORTANT STRATEGIC AIM\n\nThese rules are intended to probe for patterns that are less likely to be widely known than generic momentum, breakout, or volatility rules.\nBias toward:\n- same-bar cross-source disagreement\n- counter-folklore regime asymmetries\n- local weakness that is contradicted by broader context\n- horizon-specific effects\n- simple conjunctions that can later be replay-tested\n- routing rules that classify the same trigger into fast-decay versus slow-build outcomes\n\nVALIDATION STANDARD\n\nFor each candidate rule:\n1. Test the exact hypothesis as written.\n2. Report support size, number of distinct products, and concentration risk.\n3. Compare against its intended base condition or relevant baseline, not only against the global dataset.\n4. Check whether uplift persists across many symbols, not just aggregate rows.\n5. Check whether the rule is likely just a generic momentum, volatility, or drift effect in disguise.\n6. Check whether the rule still looks useful when simplified into a replay-testable form using Coinbase-native candles and any allowed contextual features.\n7. Reject fragile findings driven by thin-history assets, stale assets, mapping artefacts, very small samples, timing leaks, or period-specific distortions.\n8. Preserve horizon specificity. Do not treat a short-horizon rule as if it were a longer-horizon continuation rule.\n9. For divergence rules, explicitly test decay shape:\n   - h1 close excess\n   - h4 close excess\n   - h24 close excess\n   - h1, h4, h24 max-up excess\n   - close/max ratio\n   - half-1 vs half-2 horizon stability\n   - per-symbol decay heterogeneity\n10. Where appropriate, test whether a routing rule can split a trigger into:\n   - fast-decay / exit early\n   - slow-build / hold longer\n\nREQUIRED OUTPUT FORMAT\n\nFor each rule, output:\n- Rule ID\n- Rule name\n- Hypothesis\n- Source attribution\n- Exact test definition used\n- Base condition or baseline used\n- Candidate condition\n- Support rows\n- Distinct products\n- Largest product share\n- Target horizon\n- Base touch rate\n- Candidate touch rate\n- Absolute uplift in touch rate\n- Mean forward return change\n- Mean forward max-up change\n- Close/max ratio if applicable\n- Median per-product uplift if available\n- Time-split or subperiod stability verdict if available\n- Per-symbol decay-shape verdict if applicable\n- Concentration verdict\n- Robustness verdict\n- Novelty verdict\n- Whether CoinAPI contribution appears additive, redundant, noisy, or conditional\n- Whether the rule should be promoted, refined, ranked, or rejected\n- Simplest replay-testable implementation suggestion\n\nDECISION PRINCIPLES\n\nBias toward:\n- non-obvious conditional interactions\n- source-differential signals\n- regime-specific asymmetries\n- rules with decent support size\n- explainable rules\n- rules that can later be replay-tested on Coinbase candles\n- rule families that preserve edge after introducing realistic exits\n\nBias against:\n- fragile one-off curiosities\n- tiny support\n- single-coin accidents\n- edges that are just generic \"trend up then more up\"\n- edges that vanish once Coinbase-only features already explain them\n- ca_*-only rules that simply restate cb_* twins\n- triggers that look strong only under close-to-close measurement but give back most of their excursion without a plausible exit plan\n\nFinal output should rank the candidate rules from strongest to weakest based on:\n- robustness\n- novelty\n- practical usefulness\n- support size\n- replay-testability\n- execution realism\n",
+  "analysis_context": {
+    "run_id": "20260430T160547Z",
+    "assumed_run_metadata": {
+      "app_version": "v1.0.9",
+      "lookback_hours": 720,
+      "max_products": 150,
+      "quote_currency": "USD",
+      "bar_granularity": "1 hour",
+      "feature_rows_approx": 102056,
+      "label_assumption": "strict future-horizon labels intended to be correct"
+    },
+    "updated_thesis_to_test": [
+      "Rule A is temporally well-scattered and not meaningfully clustered by event or hour-of-day.",
+      "Rule A has its most robust fixed horizon at 4H, although average excess continues building to 24H.",
+      "Rule B is better treated as a fast 1H trade than as a slower hold.",
+      "Rule A likely contains at least two latent subclasses: fast-decay and slow-build.",
+      "The next likely unknown edge is not only trigger discovery, but trigger routing by decay profile."
+    ],
+    "execution_findings_to_validate": [
+      "Rule A close/max ratio is approximately one-third across horizons, implying substantial giveback from peak excursion.",
+      "Rule A half-window stability is strongest at 4H, weaker at 1H and 24H.",
+      "Rule A per-symbol decay shapes differ materially; a single universal exit may be suboptimal.",
+      "A trailing-stop or take-profit-aware implementation may outperform buy-and-close for Rule A."
+    ]
+  },
+  "rule_families": [
+    {
+      "family_id": "UPDATED_FAMILY_1",
+      "family_name": "Same-bar cross-source catch-up",
+      "description": "Coinbase appears behind the broader cross-venue market on the same 1H bar and then catches up upward."
+    },
+    {
+      "family_id": "UPDATED_FAMILY_2",
+      "family_name": "Fast divergence reaction",
+      "description": "Extreme negative divergence acts more like a fast, reactive 1H trade than a slow drift trade."
+    },
+    {
+      "family_id": "UPDATED_FAMILY_3",
+      "family_name": "Decay-profile routing",
+      "description": "The same trigger may split into fast-decay and slow-build subclasses that need different horizons or exits."
+    },
+    {
+      "family_id": "UPDATED_FAMILY_4",
+      "family_name": "Bearish-major regime asymmetry",
+      "description": "Local weakness in alts appears surprisingly buyable when both BTC and ETH context are bearish."
+    }
+  ],
+  "candidate_rules": [
+    {
+      "rule_id": "UPDATED_RULE_001",
+      "name": "Rule A fixed-horizon implementation at 4H",
+      "priority": 1,
+      "family_id": "UPDATED_FAMILY_1",
+      "hypothesis": "Same-bar Coinbase trailing versus cross-venue strength remains the strongest non-obvious trigger family, and 4H is its most robust fixed horizon.",
+      "source_attribution": [
+        "Coinbase-native features",
+        "CoinAPI-enriched features",
+        "cross-source divergence features"
+      ],
+      "exact_definition": {
+        "all_conditions": [
+          {
+            "field": "cb_ret_1",
+            "logic": "in_bottom_quantile",
+            "quantile": 0.2
+          },
+          {
+            "field": "ca_ret_1",
+            "logic": "in_top_quantile",
+            "quantile": 0.2
+          }
+        ]
+      },
+      "recommended_primary_horizon": "4H",
+      "secondary_monitor_horizon": "24H",
+      "reported_support": {
+        "rows": 223,
+        "distinct_symbols": 39,
+        "top_symbol_share": 0.135
+      },
+      "reported_decay_summary": {
+        "h1_close_excess": 0.00779,
+        "h4_close_excess": 0.01813,
+        "h24_close_excess": 0.05582,
+        "h1_max_up_excess": 0.01458,
+        "h4_max_up_excess": 0.03745,
+        "h24_max_up_excess": 0.12151,
+        "close_to_max_ratio_approx": 0.35
+      },
+      "why_interesting": "This remains the strongest same-bar divergence rule, but the addendum implies 4H is the most stable fixed horizon rather than 24H.",
+      "required_checks": [
+        "Confirm h4 remains the most stable horizon across subperiods.",
+        "Confirm signal is not timing-leak dependent.",
+        "Test replay on Coinbase-native execution bars.",
+        "Compare buy-and-close against trailing-stop and fixed-take-profit implementations."
+      ]
+    },
+    {
+      "rule_id": "UPDATED_RULE_002",
+      "name": "Rule B fast-trade implementation at 1H",
+      "priority": 2,
+      "family_id": "UPDATED_FAMILY_2",
+      "hypothesis": "Extreme negative Coinbase-versus-cross-venue divergence is better treated as a fast 1H trade than a slower hold.",
+      "source_attribution": [
+        "cross-source divergence features"
+      ],
+      "exact_definition": {
+        "field": "cs_coinbase_vs_coinapi_return_diff",
+        "logic": "in_bottom_quantile",
+        "quantiles_to_test": [
+          0.01,
+          0.05,
+          0.1
+        ]
+      },
+      "recommended_primary_horizon": "1H",
+      "secondary_monitor_horizon": "4H",
+      "reported_decay_summary_examples": {
+        "bottom_1pct": {
+          "h1_close_excess": 0.011,
+          "h4_close_excess": 0.0125,
+          "h24_close_excess": 0.0328,
+          "h1_share_of_h4_close_excess": 0.88
+        }
+      },
+      "why_interesting": "Unlike Rule A, this looks reactive rather than durable; the app should test it as a fast trade.",
+      "required_checks": [
+        "Validate that most usable close excess is captured by 1H.",
+        "Compare threshold implementation versus ranking-first implementation.",
+        "Test whether a simple first-hour exit beats longer fixed horizons."
+      ]
+    },
+    {
+      "rule_id": "UPDATED_RULE_003",
+      "name": "Rule A fast-decay routing hypothesis",
+      "priority": 3,
+      "family_id": "UPDATED_FAMILY_3",
+      "hypothesis": "Some Rule A hits are fast-decay setups that should be exited by 1H to 4H rather than held toward 24H.",
+      "source_attribution": [
+        "Coinbase-native features",
+        "CoinAPI-enriched features",
+        "cross-source divergence features"
+      ],
+      "parent_rule": "UPDATED_RULE_001",
+      "routing_objective": "Identify Rule A hits whose edge peaks early and is partly or fully given back by 24H.",
+      "candidate_routing_predictors_to_test": [
+        "trigger-bar volume intensity",
+        "CoinAPI liquidity bucket",
+        "relative volume features",
+        "extreme same-bar divergence magnitude",
+        "local bar shape / close location",
+        "symbol identity or symbol cohort",
+        "BTC/ETH regime state"
+      ],
+      "success_definition": "A simple routing condition that materially improves early-exit performance and avoids later giveback on a broad subset of Rule A hits.",
+      "why_interesting": "The addendum shows meaningful per-symbol front-loaded behavior; the next edge may be routing, not a new trigger.",
+      "required_checks": [
+        "Test whether volume-at-trigger separates fast-decay from slow-build hits.",
+        "Test whether liquidity tier or symbol cohort explains fast-decay behavior.",
+        "Reject if routing requires complex or overfit symbol-specific logic."
+      ]
+    },
+    {
+      "rule_id": "UPDATED_RULE_004",
+      "name": "Rule A slow-build routing hypothesis",
+      "priority": 4,
+      "family_id": "UPDATED_FAMILY_3",
+      "hypothesis": "Some Rule A hits are slow-build setups that should be held toward 24H with a trailing stop rather than exited early.",
+      "source_attribution": [
+        "Coinbase-native features",
+        "CoinAPI-enriched features",
+        "cross-source divergence features"
+      ],
+      "parent_rule": "UPDATED_RULE_001",
+      "routing_objective": "Identify Rule A hits whose edge builds across time and remains strong into 24H.",
+      "candidate_routing_predictors_to_test": [
+        "trigger-bar volume intensity",
+        "CoinAPI liquidity bucket",
+        "BTC/ETH regime state",
+        "divergence magnitude and sign context",
+        "local trend distance features",
+        "symbol cohort"
+      ],
+      "success_definition": "A simple routing condition that materially improves trailing-stop or longer-hold performance on a broad subset of Rule A hits.",
+      "why_interesting": "The addendum shows sustained-build symbols exist; capturing them could unlock more of Rule A's 24H max-up profile.",
+      "required_checks": [
+        "Compare h4 exit, h24 close, and trailing-stop outcomes inside the routed subset.",
+        "Test whether routed slow-build hits retain breadth across symbols.",
+        "Reject if routing condition is too narrow or dominated by a few symbols."
+      ]
+    },
+    {
+      "rule_id": "UPDATED_RULE_005",
+      "name": "Dual-bearish BTC and ETH context plus weak Coinbase 1H return",
+      "priority": 5,
+      "family_id": "UPDATED_FAMILY_4",
+      "hypothesis": "When both BTC and ETH context regimes are bearish and the Coinbase 1H return is weak, local weakness is more buyable than generic intuition suggests.",
+      "source_attribution": [
+        "Coinbase-native features",
+        "broader context features"
+      ],
+      "exact_definition": {
+        "all_conditions": [
+          {
+            "field": "cx_btc_regime_flag",
+            "logic": "==",
+            "value": -1
+          },
+          {
+            "field": "cx_eth_regime_flag",
+            "logic": "==",
+            "value": -1
+          },
+          {
+            "field": "cb_ret_1",
+            "logic": "in_bottom_quantile",
+            "quantile": 0.2
+          }
+        ]
+      },
+      "target_horizons": [
+        "1H",
+        "4H",
+        "24H"
+      ],
+      "why_interesting": "This remains one of the strongest broader, counter-folklore regime asymmetry families and may prove more stable than narrow divergence rules.",
+      "required_checks": [
+        "Compare against weak cb_ret_1 without the regime filter.",
+        "Validate across longer windows and multiple regime periods.",
+        "Check whether BTC-only or ETH-only bearish context is weaker than dual-bearish context."
+      ]
+    },
+    {
+      "rule_id": "UPDATED_RULE_006",
+      "name": "Dual-bearish BTC and ETH context plus weak Coinbase close-location-in-bar",
+      "priority": 6,
+      "family_id": "UPDATED_FAMILY_4",
+      "hypothesis": "When both BTC and ETH context are bearish and the Coinbase bar closes weakly within its own range, later upside odds improve materially.",
+      "source_attribution": [
+        "Coinbase-native features",
+        "broader context features"
+      ],
+      "exact_definition": {
+        "all_conditions": [
+          {
+            "field": "cx_btc_regime_flag",
+            "logic": "==",
+            "value": -1
+          },
+          {
+            "field": "cx_eth_regime_flag",
+            "logic": "==",
+            "value": -1
+          },
+          {
+            "field": "cb_close_location_in_bar",
+            "logic": "in_bottom_quantile",
+            "quantile": 0.2
+          }
+        ]
+      },
+      "target_horizons": [
+        "1H",
+        "4H",
+        "24H"
+      ],
+      "why_interesting": "This is a broad, simple bridge rule that may prove easier to operationalize than the narrower divergence family.",
+      "required_checks": [
+        "Compare against weak close-location without the regime filter.",
+        "Check whether this is independent of simple lower-tail return effects.",
+        "Validate robustness over longer lookbacks."
+      ]
+    }
+  ],
+  "execution_tests": [
+    {
+      "test_id": "EXEC_TEST_001",
+      "name": "Rule A exit-shape comparison",
+      "applies_to": [
+        "UPDATED_RULE_001",
+        "UPDATED_RULE_003",
+        "UPDATED_RULE_004"
+      ],
+      "required_checks": [
+        "Compare fixed 1H, fixed 4H, fixed 24H, trailing-stop, and fixed-take-profit implementations.",
+        "Measure close return, max-up capture, and giveback.",
+        "Decide whether h4 should remain the default fixed horizon."
+      ]
+    },
+    {
+      "test_id": "EXEC_TEST_002",
+      "name": "Rule B fast-exit validation",
+      "applies_to": [
+        "UPDATED_RULE_002"
+      ],
+      "required_checks": [
+        "Compare first-hour close exit versus holding to 4H and 24H.",
+        "Test whether profit-target logic improves capture without overcomplication."
+      ]
+    },
+    {
+      "test_id": "EXEC_TEST_003",
+      "name": "Breakeven-cost survival",
+      "applies_to": [
+        "UPDATED_RULE_001",
+        "UPDATED_RULE_002",
+        "UPDATED_RULE_003",
+        "UPDATED_RULE_004"
+      ],
+      "required_checks": [
+        "Estimate breakeven slippage/spread tolerance for each rule and exit style.",
+        "Downgrade rules whose edge disappears under realistic small-cap frictions."
+      ]
+    }
+  ],
+  "orthogonality_and_follow_up_tests": [
+    {
+      "test_id": "UPDATED_TEST_001",
+      "name": "Compare against common Coinbase momentum rule",
+      "definition": {
+        "all_conditions": [
+          {
+            "field": "cb_ret_3",
+            "logic": ">",
+            "value": 0
+          },
+          {
+            "field": "cb_rel_volume_short",
+            "logic": ">",
+            "value": 1
+          },
+          {
+            "field": "cb_sma_5_dist",
+            "logic": ">",
+            "value": -0.01
+          }
+        ]
+      },
+      "required_checks": [
+        "Measure overlap with UPDATED_RULE_001 and UPDATED_RULE_002.",
+        "Quantify edge of divergence rows outside the Coinbase momentum rule.",
+        "Decide whether the updated deep rules are genuinely orthogonal or just harder-to-see momentum."
+      ]
+    },
+    {
+      "test_id": "UPDATED_TEST_002",
+      "name": "Timing-leak audit for same-bar divergence rules",
+      "required_checks": [
+        "Confirm same-bar divergence uses only information observable at that bar close.",
+        "Audit bar alignment gaps for all UPDATED_RULE_001 and UPDATED_RULE_002 hits.",
+        "Reject or downgrade any rule whose edge depends on timing leakage."
+      ]
+    },
+    {
+      "test_id": "UPDATED_TEST_003",
+      "name": "Longer-lookback stability",
+      "required_checks": [
+        "Re-run all updated rules on materially longer lookback windows.",
+        "Assess whether sign and ordering survive even if magnitudes compress.",
+        "Prioritise rules that retain breadth and novelty on longer windows."
+      ]
+    },
+    {
+      "test_id": "UPDATED_TEST_004",
+      "name": "Routing predictor audit",
+      "required_checks": [
+        "Evaluate trigger-bar volume as a splitter of fast-decay versus slow-build Rule A hits.",
+        "Test whether liquidity tier, regime state, or local bar shape materially improves routing.",
+        "Prefer simple routing logic over symbol-specific memorization."
+      ]
+    }
+  ],
+  "global_caveats": [
+    "This run reflects a relatively short positive-drift window; magnitudes may compress on longer lookbacks even if signs survive.",
+    "Timing and bar-alignment risk is especially important for same-bar Coinbase-versus-cross-venue rules.",
+    "Any rule that works only because of thin-history assets, stale products, or mapping artefacts should be rejected.",
+    "Rule A appears temporally well-scattered, but its optimal exit horizon is not stable across all subperiods or symbols.",
+    "Broader regime asymmetries may be more stable than very high-magnitude narrow divergence rules, but that must be proven rather than assumed."
+  ],
+  "priority_experiments": [
+    "Replay UPDATED_RULE_001 on Coinbase-native execution bars with fixed 4H exit plus trailing-stop comparison.",
+    "Replay UPDATED_RULE_002 as a 1H-fast trade rather than a slower hold.",
+    "Test routing logic for UPDATED_RULE_003 and UPDATED_RULE_004 using trigger-bar volume, liquidity, regime, and local bar shape.",
+    "Run breakeven-cost survival analysis for the divergence rules.",
+    "Test UPDATED_RULE_005 and UPDATED_RULE_006 across longer windows to compare broad stability versus narrow divergence strength."
+  ],
+  "global_instructions": {
+    "use_empirical_thresholds_from_dataset": true,
+    "avoid_single_symbol_conclusions": true,
+    "report_concentration_metrics": true,
+    "preserve_horizon_specificity": true,
+    "require_base_vs_candidate_comparisons": true,
+    "require_coinapi_value_judgment": true,
+    "require_replay_testability_comment": true,
+    "require_timing_leak_audit_for_cs_rules": true,
+    "require_exit_shape_analysis_for_divergence_rules": true
+  }
+}
