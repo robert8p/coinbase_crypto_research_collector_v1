@@ -2,15 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi import Request
 
 from .pipeline import ResearchPipeline
+from .live_shadow import LiveShadowService
 from .rule_backtests import RuleBacktestService
 from .rule_eval import RuleEvaluationService
-from .schemas import DataPullRequest, ExportBuildRequest, PipelineRunRequest, RuleBacktestRequest, RuleEvalRequest
+from .schemas import DataPullRequest, ExportBuildRequest, LiveShadowRequest, PipelineRunRequest, RuleBacktestRequest, RuleEvalRequest
 from .settings import get_settings
 from .storage import StorageManager
 
@@ -19,9 +20,11 @@ storage = StorageManager(settings)
 pipeline = ResearchPipeline(settings)
 rule_service = RuleEvaluationService(storage)
 rule_backtest_service = RuleBacktestService(storage)
+live_shadow_service = LiveShadowService(settings, storage, pipeline, rule_backtest_service)
 
 app = FastAPI(title=settings.app_name, version=settings.app_version)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+MAX_UPLOAD_BYTES = 2 * 1024 * 1024
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -36,6 +39,7 @@ def index(request: Request) -> HTMLResponse:
             "status": storage.read_json(storage.status_path),
             "exports": storage.list_latest_run_artifacts(),
             "latest_rule_backtest": storage.read_latest_rule_backtest_manifest(),
+            "latest_live_shadow": storage.read_latest_live_shadow_manifest(),
             "rule_library": {"rules": rule_backtest_service.list_rules()},
         },
     )
@@ -43,13 +47,27 @@ def index(request: Request) -> HTMLResponse:
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "app": settings.app_name, "version": settings.app_version, "mock_mode": settings.use_mock_data}
+    cb_mock = pipeline.coinbase.mock_mode
+    ca_mock = pipeline.coinapi.mock_mode
+    return {
+        "status": "ok",
+        "app": settings.app_name,
+        "version": settings.app_version,
+        "use_mock_data_flag": settings.use_mock_data,
+        "effective_mock_mode_coinbase": cb_mock,
+        "effective_mock_mode_coinapi": ca_mock,
+        "credentials_configured": {
+            "coinbase": bool(settings.coinbase_api_key_name and settings.coinbase_api_private_key),
+            "coinapi": bool(settings.coinapi_api_key),
+        },
+    }
 
 
 @app.get("/api/status")
 def api_status() -> dict:
     latest_manifest = storage.read_latest_manifest()
     latest_rule_backtest = storage.read_latest_rule_backtest_manifest()
+    latest_live_shadow = storage.read_latest_live_shadow_manifest()
     return {
         "status": storage.read_json(storage.status_path),
         "exports": storage.list_latest_run_artifacts(),
@@ -74,6 +92,15 @@ def api_status() -> dict:
             "app_version": latest_rule_backtest.get("version"),
             "horizon": latest_rule_backtest.get("request", {}).get("horizon"),
             "artifacts": latest_rule_backtest.get("artifacts", []),
+        },
+        "latest_live_shadow": {
+            "run_id": latest_live_shadow.get("run_id"),
+            "generated_at": latest_live_shadow.get("generated_at"),
+            "app_version": latest_live_shadow.get("version"),
+            "request": latest_live_shadow.get("request", {}),
+            "summary": latest_live_shadow.get("summary", {}),
+            "artifacts": latest_live_shadow.get("artifacts", []),
+            "summary_rows": latest_live_shadow.get("summary_rows", []),
         },
     }
 
@@ -188,17 +215,25 @@ def api_rule_backtest_library() -> dict:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-
-
 @app.post("/api/rule-backtests/library/upload")
 async def api_rule_backtest_library_upload(files: list[UploadFile] = File(default=[]), pasted_json: str | None = Form(default=None)) -> dict:
     try:
         file_payloads: list[tuple[str, str]] = []
         for upload in files:
-            file_payloads.append((upload.filename or "uploaded_rules.json", (await upload.read()).decode("utf-8")))
+            if upload.content_type not in {None, "", "application/json", "text/plain"}:
+                raise HTTPException(status_code=415, detail=f"Unsupported content type for {upload.filename or 'upload'}.")
+            data = await upload.read()
+            if len(data) > MAX_UPLOAD_BYTES:
+                raise HTTPException(status_code=413, detail="File too large (> 2 MB).")
+            file_payloads.append((upload.filename or "uploaded_rules.json", data.decode("utf-8")))
+        if pasted_json and len(pasted_json.encode("utf-8")) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="Pasted JSON too large (> 2 MB).")
         return rule_backtest_service.upload_rules(file_payloads=file_payloads, pasted_json=pasted_json)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
 
 @app.post("/api/rule-backtests/run")
 def api_rule_backtests_run(payload: RuleBacktestRequest) -> dict:
@@ -211,6 +246,28 @@ def api_rule_backtests_run(payload: RuleBacktestRequest) -> dict:
 @app.get("/api/rule-backtests/latest")
 def api_rule_backtests_latest() -> dict:
     return storage.read_latest_rule_backtest_manifest()
+
+
+@app.post("/api/live/shadow/run")
+def api_live_shadow_run(payload: LiveShadowRequest, background_tasks: BackgroundTasks) -> dict:
+    try:
+        run_id = storage.make_run_id()
+        storage.update_status(
+            "live_shadow_cycle",
+            "queued",
+            message="Live shadow validation cycle queued",
+            run_id=run_id,
+            phase="queued",
+        )
+        background_tasks.add_task(live_shadow_service.run_cycle, payload, run_id)
+        return {"run_id": run_id, "status": "queued", "version": settings.app_version}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/live/shadow/latest")
+def api_live_shadow_latest() -> dict:
+    return live_shadow_service.latest_manifest()
 
 
 @app.get("/download/{filename}")

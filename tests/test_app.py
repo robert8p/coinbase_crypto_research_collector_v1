@@ -55,6 +55,38 @@ def test_end_to_end_pipeline(tmp_path: Path):
 
 
 
+
+def test_health_reports_effective_mock_modes_and_credentials(tmp_path: Path):
+    client = build_client(tmp_path)
+    payload = client.get('/health').json()
+    assert payload['status'] == 'ok'
+    assert payload['use_mock_data_flag'] is True
+    assert payload['effective_mock_mode_coinbase'] is True
+    assert payload['effective_mock_mode_coinapi'] is True
+    assert payload['credentials_configured']['coinbase'] is False
+
+
+def test_rule_eval_rejects_path_traversal_rule_name(tmp_path: Path):
+    client = build_client(tmp_path)
+    client.post('/api/pipeline/run', json={'lookback_hours': 72, 'max_products': 5, 'compress_chatgpt_csv': True})
+    resp = client.post('/api/rule-eval/run', json={
+        'rule_name': '../../../../tmp/PWNED',
+        'conditions': [{'feature': 'cb_ret_1', 'operator': '>', 'value': -10}],
+        'scopes': ['coinbase_only'],
+        'target_column': 'future_close_return_h4',
+    })
+    assert resp.status_code == 422
+
+
+def test_mock_coinapi_bars_preserve_ohlcv_ordering(tmp_path: Path):
+    client = build_client(tmp_path)
+    client.post('/api/pipeline/run', json={'lookback_hours': 72, 'max_products': 5, 'compress_chatgpt_csv': True})
+    import app.main as app_main
+    ca = app_main.storage.read_frame('coinapi_bars', processed=False)
+    assert not ca.empty
+    violations = ((ca['close'] > ca['high']) | (ca['close'] < ca['low']) | (ca['open'] > ca['high']) | (ca['open'] < ca['low'])).sum()
+    assert int(violations) == 0
+
 def test_universe_refresh_keeps_view_only_rows_by_default(tmp_path, monkeypatch):
     from app.pipeline import ResearchPipeline
     from app.settings import Settings
@@ -258,7 +290,7 @@ def test_future_outcomes_require_full_horizon_and_preserve_tail_nans():
     df = pd.DataFrame(
         {
             "product_id": ["BTC-USD"] * 6,
-            "ts": pd.date_range("2024-01-01", periods=6, freq="H", tz="UTC"),
+            "ts": pd.date_range("2024-01-01", periods=6, freq="h", tz="UTC"),
             "open": [100, 101, 102, 103, 104, 105],
             "high": [101, 102, 103, 104, 105, 106],
             "low": [99, 100, 101, 102, 103, 104],
@@ -346,7 +378,7 @@ def test_status_and_latest_exports_reflect_effective_run_settings_and_versioned_
     status_payload = client.get('/api/status').json()
     assert status_payload['effective_run_settings']['lookback_hours'] == 72
     assert status_payload['effective_run_settings']['max_products'] == 5
-    assert status_payload['latest_run']['app_version'] == '1.2.0'
+    assert status_payload['latest_run']['app_version'] == '1.4.0'
 
     latest = client.get('/api/export/latest').json()
     names = {item['name'] for item in latest['artifacts']}
@@ -390,7 +422,7 @@ def test_rule_backtest_library_and_run(tmp_path: Path):
     latest = client.get('/api/rule-backtests/latest')
     assert latest.status_code == 200
     latest_payload = latest.json()
-    assert latest_payload['version'] == '1.2.0'
+    assert latest_payload['version'] == '1.4.0'
     assert latest_payload['request']['horizon'] == 'h4'
 
 
@@ -510,9 +542,45 @@ def test_updated_pack_direct_rule_and_routing_and_execution_backtests(tmp_path: 
 
 def test_updated_pack_upload_supports_candidate_rules_and_execution_tests(tmp_path: Path):
     client = build_client(tmp_path)
-    payload = Path('/mnt/data/updated_deep_crypto_unknown_pattern_test_pack.json').read_text()
+    payload = ((Path(__file__).resolve().parents[1] / "app" / "resources" / "updated_deep_crypto_unknown_pattern_test_pack.json")).read_text()
     upload = client.post('/api/rule-backtests/library/upload', files=[('files', ('updated_pack.json', payload, 'application/json'))])
     assert upload.status_code == 200
     ids = set(upload.json()['uploaded_rule_ids'])
     assert 'UPDATED_RULE_001' in ids
     assert 'EXEC_TEST_001' in ids
+
+
+
+def test_live_shadow_cycle_and_latest_manifest(tmp_path: Path):
+    client = build_client(tmp_path)
+    assert client.post('/api/universe/refresh').status_code == 200
+    assert client.post('/api/mappings/refresh').status_code == 200
+    run_resp = client.post('/api/live/shadow/run', json={
+        'selection_mode': 'selected',
+        'rule_ids': ['MERGED_RULE_001'],
+        'lookback_hours': 72,
+        'max_products': 5,
+        'refresh_references': False,
+        'as_of_time_iso': '2026-05-01T12:00:00Z',
+    })
+    assert run_resp.status_code == 200
+    payload = run_resp.json()
+    assert payload['version'] == '1.4.0'
+    assert payload['status'] == 'queued'
+
+    latest = client.get('/api/live/shadow/latest')
+    assert latest.status_code == 200
+    latest_payload = latest.json()
+    assert latest_payload['version'] == '1.4.0'
+    assert latest_payload['request']['lookback_hours'] == 72
+    assert any(item['name'].startswith('live_validation_pack__') for item in latest_payload['artifacts'])
+
+
+def test_index_contains_live_shadow_tab_and_controls(tmp_path: Path):
+    client = build_client(tmp_path)
+    response = client.get('/')
+    assert response.status_code == 200
+    html = response.text
+    assert 'data-tab-target="live"' in html
+    assert 'Run live cycle for selected rules' in html
+    assert '/api/live/shadow/run' in html

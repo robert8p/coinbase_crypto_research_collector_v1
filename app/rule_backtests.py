@@ -15,6 +15,8 @@ from .schemas import RuleBacktestRequest
 from .storage import StorageManager
 
 
+MAX_CUSTOM_RULES = 500
+
 RULE_RESOURCE_PATHS = [
     Path(__file__).parent / "resources" / "merged_coinbase_coinapi_rule_validation_prompt.json",
     Path(__file__).parent / "resources" / "updated_deep_crypto_unknown_pattern_test_pack.json",
@@ -78,15 +80,22 @@ class RuleBacktestService:
                 "schema_version": "1.0",
                 "candidate_rules": [],
             }
-        with self.custom_rule_library_path.open("r", encoding="utf-8") as f:
-            payload = json.load(f)
+        try:
+            with self.custom_rule_library_path.open("r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except json.JSONDecodeError:
+            return {
+                "artifact_type": "custom_rule_library",
+                "schema_version": "1.0",
+                "candidate_rules": [],
+                "library_error": "custom rule library was unreadable and has been ignored",
+            }
         payload.setdefault("candidate_rules", [])
         return payload
 
     def _write_custom_library(self, payload: dict[str, Any]) -> None:
         self.custom_rule_library_path.parent.mkdir(parents=True, exist_ok=True)
-        with self.custom_rule_library_path.open("w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2, ensure_ascii=False)
+        self.storage.write_json(payload, self.custom_rule_library_path)
 
     def _combined_library(self) -> dict[str, Any]:
         builtin = self._read_builtin_library()
@@ -257,6 +266,9 @@ class RuleBacktestService:
                 }
             )
 
+        if len(existing_by_id) > MAX_CUSTOM_RULES:
+            raise ValueError(f"Too many custom rules. Limit is {MAX_CUSTOM_RULES}.")
+
         new_payload = {
             "artifact_type": "custom_rule_library",
             "schema_version": "1.2",
@@ -392,6 +404,13 @@ class RuleBacktestService:
             return series < value, metadata
         if logic == "<=":
             return series <= value, metadata
+        if value is not None and not isinstance(value, bool) and isinstance(value, str):
+            try:
+                value = float(value)
+                metadata["value"] = value
+            except ValueError:
+                pass
+
         if logic == "==":
             return series == value, metadata
         if logic == "!=":
@@ -709,7 +728,7 @@ class RuleBacktestService:
         for descriptor, field in predictor_fields:
             for bucket_name, bucket_mask in self._subset_rows_for_field(parent_df, field):
                 subset = parent_df.loc[bucket_mask].copy()
-                if len(subset) < max(10, int(max(len(parent_df) * 0.05, 1))):
+                if len(subset) < max(3, int(max(len(parent_df) * 0.05, 1))):
                     continue
                 metrics = self._multi_horizon_metrics(subset)
                 distinct_products, largest_share = self._product_concentration(subset)
@@ -1083,7 +1102,7 @@ class RuleBacktestService:
                 if source.exists():
                     zf.write(source, arcname=source.name)
         manifest = {
-            "generated_at": pd.Timestamp.utcnow().isoformat(),
+            "generated_at": pd.Timestamp.now("UTC").isoformat(),
             "run_id": run_id,
             "app": self.storage.settings.app_name,
             "version": self.storage.settings.app_version,

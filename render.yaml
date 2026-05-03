@@ -8,7 +8,7 @@ services:
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
-        value: 3.13.5
+        value: 3.12.7
       - key: USE_MOCK_DATA
         value: "false"
       - key: DATA_DIR

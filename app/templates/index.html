@@ -868,6 +868,7 @@
         <button class="tab" role="tab" aria-selected="false" data-tab-target="data" onclick="switchTab('data')">Data collection</button>
         <button class="tab" role="tab" aria-selected="false" data-tab-target="rules" onclick="switchTab('rules')">Rules</button>
         <button class="tab" role="tab" aria-selected="false" data-tab-target="backtesting" onclick="switchTab('backtesting')">Backtesting</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab-target="live" onclick="switchTab('live')">Live</button>
         <button class="tab" role="tab" aria-selected="false" data-tab-target="results" onclick="switchTab('results')">Results</button>
         <button class="tab" role="tab" aria-selected="false" data-tab-target="diagnostics" onclick="switchTab('diagnostics')">Diagnostics</button>
         <button class="tab" role="tab" aria-selected="false" data-tab-target="admin" onclick="switchTab('admin')">Admin</button>
@@ -1193,10 +1194,105 @@
       </div>
     </section>
 
+
+
+    <section class="tab-panel" data-tab-panel="live">
+      <div class="panel-stack">
+        <div class="panel-grid">
+          <div class="card span-5">
+            <div class="card-header">
+              <div>
+                <h2>Live shadow validation</h2>
+                <p class="section-copy">Evaluate selected direct rules on the latest completed hourly bar, freeze the signal snapshot, and resolve H1/H4/H24 outcomes on later cycles without placing trades.</p>
+              </div>
+              <span class="pill soft">Read-only</span>
+            </div>
+            <div class="controls">
+              <div>
+                <label for="liveLookbackHours">Live lookback hours</label>
+                <input id="liveLookbackHours" type="number" min="24" step="24" />
+              </div>
+              <div>
+                <label for="liveMaxProducts">Live max products</label>
+                <input id="liveMaxProducts" type="number" min="1" step="1" />
+              </div>
+            </div>
+            <div class="callout info" style="margin-top: 12px;" id="liveConfigSummary">Choose selected direct rules on the Rules tab or run all direct rules. The cycle refreshes live bars, computes the latest feature snapshot, evaluates the latest completed bar, and resolves any matured H1/H4/H24 outcomes from prior signals.</div>
+            <div class="button-row" style="margin-top: 14px;">
+              <button class="btn-primary" onclick="runLiveShadow('selected')">Run live cycle for selected rules</button>
+              <button class="btn-secondary" onclick="runLiveShadow('all')">Run live cycle for all direct rules</button>
+            </div>
+            <div class="helper" style="margin-top: 12px;">This is shadow validation, not execution. Signals are logged at decision time and compared against realized Coinbase outcomes later.</div>
+          </div>
+
+          <div class="card span-7">
+            <div class="card-header">
+              <div>
+                <h2>Live cycle progress</h2>
+                <p class="section-copy">See what the live engine is doing now, the latest run ID, and whether new signals or outcome resolutions were produced.</p>
+              </div>
+              <button class="btn-ghost" onclick="fetchLiveManifest(true)">Refresh live status</button>
+            </div>
+            <div class="progress-shell">
+              <div class="progress"><div id="liveProgressBar" class="progress-bar"></div></div>
+              <div class="progress-meta">
+                <span id="liveProgressLabel">No live cycle running.</span>
+                <span id="liveProgressDetail">—</span>
+              </div>
+            </div>
+            <div class="status-strip" id="liveStatusStrip" style="margin-top: 12px;"></div>
+            <pre id="liveShadowBox" class="feedback-box" style="margin-top: 12px;">No live shadow cycle run yet.</pre>
+          </div>
+        </div>
+
+        <div class="panel-grid">
+          <div class="card span-4">
+            <div class="card-header">
+              <div>
+                <h2>Latest live snapshot</h2>
+                <p class="section-copy">Quick facts from the latest live shadow run.</p>
+              </div>
+            </div>
+            <div class="metric-grid" id="liveMetrics"></div>
+          </div>
+
+          <div class="card span-8">
+            <div class="card-header">
+              <div>
+                <h2>Live validation summary</h2>
+                <p class="section-copy">Per-rule signal counts, pending validations, breadth, and realized mean outcomes from the latest live manifest.</p>
+              </div>
+            </div>
+            <div class="table-shell">
+              <div class="scroll-x">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Rule</th>
+                      <th>Signals</th>
+                      <th>Pending</th>
+                      <th>Products</th>
+                      <th>Largest share</th>
+                      <th>H1 return</th>
+                      <th>H4 return</th>
+                      <th>H24 return</th>
+                    </tr>
+                  </thead>
+                  <tbody id="liveSummaryTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="download-list" id="liveArtifacts" style="margin-top: 12px;"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
     <section class="tab-panel" data-tab-panel="results">
       <div class="panel-stack">
         <div class="panel-grid">
-          <div class="card span-6">
+          <div class="card span-4">
             <div class="card-header">
               <div>
                 <h2>Latest research artifacts</h2>
@@ -1206,7 +1302,7 @@
             <div class="download-list" id="resultsRunArtifacts"></div>
           </div>
 
-          <div class="card span-6">
+          <div class="card span-4">
             <div class="card-header">
               <div>
                 <h2>Latest rule-backtest artifacts</h2>
@@ -1214,6 +1310,16 @@
               </div>
             </div>
             <div class="download-list" id="latestRuleBacktestArtifacts"></div>
+          </div>
+
+          <div class="card span-4">
+            <div class="card-header">
+              <div>
+                <h2>Latest live-shadow artifacts</h2>
+                <p class="section-copy">Run-stamped live validation outputs, pending-signal files, and downloadable packs from the latest shadow cycle.</p>
+              </div>
+            </div>
+            <div class="download-list" id="resultsLiveArtifacts"></div>
           </div>
         </div>
 
@@ -1346,6 +1452,7 @@
       status: {{ status|tojson }},
       exports: {{ exports|tojson }},
       latest_rule_backtest: {{ latest_rule_backtest|tojson }},
+      latest_live_shadow: {{ latest_live_shadow|tojson }},
       rule_library: {{ rule_library|tojson }},
       app_name: {{ app_name|tojson }},
       app_version: {{ app_version|tojson }},
@@ -1357,6 +1464,8 @@
       ruleHorizon: 'ccrc.ruleHorizon',
       selectedRuleIds: 'ccrc.selectedRuleIds',
       activeTab: 'ccrc.activeTab',
+      liveLookbackHours: 'ccrc.liveLookbackHours',
+      liveMaxProducts: 'ccrc.liveMaxProducts',
     };
 
     let pollTimer = null;
@@ -1365,6 +1474,7 @@
       status: INITIAL_BOOT.status || {},
       exports: INITIAL_BOOT.exports || [],
       latest_rule_backtest: INITIAL_BOOT.latest_rule_backtest || {},
+      latest_live_shadow: INITIAL_BOOT.latest_live_shadow || {},
       settings: {},
       effective_run_settings: {},
       latest_run: {},
@@ -1454,6 +1564,8 @@
       localStorage.setItem(STORAGE_KEYS.lookbackHours, el('lookbackHours').value);
       localStorage.setItem(STORAGE_KEYS.maxProducts, el('maxProducts').value);
       localStorage.setItem(STORAGE_KEYS.ruleHorizon, el('ruleHorizon').value);
+      localStorage.setItem(STORAGE_KEYS.liveLookbackHours, el('liveLookbackHours').value);
+      localStorage.setItem(STORAGE_KEYS.liveMaxProducts, el('liveMaxProducts').value);
       localStorage.setItem(STORAGE_KEYS.selectedRuleIds, JSON.stringify(getSelectedRuleIds()));
     }
 
@@ -1489,9 +1601,13 @@
       const savedLookback = localStorage.getItem(STORAGE_KEYS.lookbackHours);
       const savedMaxProducts = localStorage.getItem(STORAGE_KEYS.maxProducts);
       const savedRuleHorizon = localStorage.getItem(STORAGE_KEYS.ruleHorizon);
+      const savedLiveLookback = localStorage.getItem(STORAGE_KEYS.liveLookbackHours);
+      const savedLiveMaxProducts = localStorage.getItem(STORAGE_KEYS.liveMaxProducts);
       el('lookbackHours').value = savedLookback ?? String(effective.lookback_hours ?? settings.lookback_hours ?? 336);
       el('maxProducts').value = savedMaxProducts ?? String(effective.max_products ?? settings.top_n_by_volume ?? settings.max_universe_size ?? '');
       el('ruleHorizon').value = savedRuleHorizon ?? 'h4';
+      el('liveLookbackHours').value = savedLiveLookback ?? String(effective.lookback_hours ?? settings.lookback_hours ?? 720);
+      el('liveMaxProducts').value = savedLiveMaxProducts ?? String(effective.max_products ?? settings.top_n_by_volume ?? settings.max_universe_size ?? 150);
     }
 
     function progressPercent(progressText) {
@@ -1509,6 +1625,7 @@
         ['feature_compute', 'Features'],
         ['export_build', 'Exports'],
         ['rule_backtest', 'Rule backtest'],
+        ['live_shadow_cycle', 'Live shadow'],
       ];
       const html = order.map(([key, label]) => {
         const step = steps?.[key] || {};
@@ -1885,6 +2002,89 @@
       switchTab('rules');
     }
 
+    function renderLiveSection(data) {
+      const live = data.latest_live_shadow || {};
+      const summary = live.summary || {};
+      const request = live.request || {};
+      const liveStep = data.status?.steps?.live_shadow_cycle || {};
+      const metrics = [
+        {label: 'Latest live run', value: live.run_id || '—'},
+        {label: 'Signals total', value: fmtNum(summary.signals_total)},
+        {label: 'Pending signals', value: fmtNum(summary.pending_signals)},
+        {label: 'Rules evaluated', value: fmtNum(summary.rules_evaluated)},
+      ];
+      setHtml('liveMetrics', metrics.map(item => `<div class="metric"><div class="label">${htmlEscape(item.label)}</div><div class="value">${htmlEscape(item.value)}</div></div>`).join(''));
+      setHtml('liveStatusStrip', `
+        <span class="status-chip ${statusClass(liveStep.status)}"><span class="dot"></span>${htmlEscape(liveStep.status || 'idle')}</span>
+        <span class="pill neutral">Latest signal bar: ${htmlEscape(summary.latest_signal_ts || '—')}</span>
+        <span class="pill neutral">Lookback: ${htmlEscape(fmtNum(request.lookback_hours))}h</span>
+        <span class="pill neutral">Universe: ${htmlEscape(fmtNum(request.max_products))} products</span>
+      `);
+      const progress = progressPercent(liveStep.progress);
+      el('liveProgressBar').style.width = `${progress}%`;
+      setText('liveProgressLabel', liveStep.status === 'running' ? (liveStep.message || 'Running live cycle…') : (live.run_id ? 'Latest live cycle completed.' : 'No live cycle run yet.'));
+      setText('liveProgressDetail', liveStep.progress ? `${liveStep.progress}${liveStep.current_product ? ` · ${liveStep.current_product}` : ''}` : (summary.pending_signals != null ? `${fmtNum(summary.pending_signals)} pending signals` : '—'));
+      setMessage('liveShadowBox', JSON.stringify(live.run_id ? live : liveStep, null, 2));
+      renderArtifacts(live.artifacts || [], 'liveArtifacts');
+      renderArtifacts(live.artifacts || [], 'resultsLiveArtifacts');
+      const rows = live.summary_rows || [];
+      const body = rows.map(row => `
+        <tr>
+          <td>${htmlEscape(row.rule_name || row.merged_rule_id)}</td>
+          <td>${htmlEscape(fmtNum(row.signals))}</td>
+          <td>${htmlEscape(fmtNum(row.pending_signals))}</td>
+          <td>${htmlEscape(fmtNum(row.distinct_products))}</td>
+          <td>${row.largest_product_share == null ? '—' : Number(row.largest_product_share).toFixed(3)}</td>
+          <td>${row.h1_mean_forward_return == null ? '—' : Number(row.h1_mean_forward_return).toFixed(4)}</td>
+          <td>${row.h4_mean_forward_return == null ? '—' : Number(row.h4_mean_forward_return).toFixed(4)}</td>
+          <td>${row.h24_mean_forward_return == null ? '—' : Number(row.h24_mean_forward_return).toFixed(4)}</td>
+        </tr>
+      `).join('');
+      setHtml('liveSummaryTableBody', body || '<tr><td colspan="8">No live summary rows yet.</td></tr>');
+      const selectedCount = getSelectedRuleIds().length;
+      setText('liveConfigSummary', selectedCount ? `${selectedCount} selected rules ready for live shadow validation. The service will evaluate direct rules only, freeze the latest completed hourly snapshot, and resolve H1/H4/H24 outcomes on later cycles.` : 'Select one or more direct rules on the Rules tab or run all direct rules. The cycle refreshes live bars, evaluates the latest completed hourly snapshot, and resolves matured outcomes from earlier signals.');
+    }
+
+    async function fetchLiveManifest(preserveTab = false) {
+      const activeTab = localStorage.getItem(STORAGE_KEYS.activeTab) || 'live';
+      const response = await fetch('/api/live/shadow/latest');
+      const data = await response.json();
+      currentStatusData.latest_live_shadow = data || {};
+      renderLiveSection(currentStatusData);
+      if (!preserveTab) switchTab(activeTab);
+      return data;
+    }
+
+    async function runLiveShadow(selectionMode) {
+      persistControls();
+      const payload = {
+        selection_mode: selectionMode,
+        rule_ids: selectionMode === 'selected' ? getSelectedRuleIds() : [],
+        lookback_hours: parseOptionalNumber(el('liveLookbackHours').value),
+        max_products: parseOptionalNumber(el('liveMaxProducts').value),
+        refresh_references: true,
+      };
+      if (selectionMode === 'selected' && (!payload.rule_ids || payload.rule_ids.length === 0)) {
+        setMessage('liveShadowBox', 'Select at least one direct rule first, or run all direct rules.');
+        switchTab('rules');
+        return;
+      }
+      switchTab('live');
+      startPolling();
+      setMessage('liveShadowBox', 'Live shadow cycle started…');
+      const response = await fetch('/api/live/shadow/run', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+      stopPolling();
+      currentStatusData.latest_live_shadow = data;
+      setMessage('liveShadowBox', JSON.stringify(data, null, 2));
+      await refreshStatus(true);
+      renderLiveSection(currentStatusData);
+    }
+
     function renderRuleResults(rows) {
       const body = rows.map(row => `
         <tr>
@@ -1917,6 +2117,7 @@
     function renderResultsSections(data) {
       renderArtifacts(data.exports || [], 'resultsRunArtifacts');
       renderArtifacts(data.latest_rule_backtest?.artifacts || [], 'latestRuleBacktestArtifacts');
+      renderArtifacts(data.latest_live_shadow?.artifacts || [], 'resultsLiveArtifacts');
       renderArtifacts(data.exports || [], 'overviewLatestArtifacts');
       renderArtifactTable(data.exports || []);
       setMessage('diagnosticBacktestJson', JSON.stringify(data.latest_rule_backtest || {}, null, 2));
@@ -1940,6 +2141,7 @@
       renderPipelineTimeline(data.status || {});
       renderDataMetrics(data);
       renderResultsSections(data);
+      renderLiveSection(data);
       renderWarnings(data);
       renderSettingsTables(data);
       updateBacktestProgress(data.status || {});
@@ -2090,7 +2292,7 @@
       pollTimer = null;
     }
 
-    ['lookbackHours', 'maxProducts', 'ruleHorizon'].forEach(id => {
+    ['lookbackHours', 'maxProducts', 'ruleHorizon', 'liveLookbackHours', 'liveMaxProducts'].forEach(id => {
       el(id).addEventListener('change', () => {
         persistControls();
         updateBacktestConfigSummary();
@@ -2108,6 +2310,7 @@
     renderPipelineTimeline(currentStatusData.status || {});
     renderDataMetrics(currentStatusData);
     renderResultsSections(currentStatusData);
+    renderLiveSection(currentStatusData);
     renderWarnings(currentStatusData);
     renderSettingsTables(currentStatusData);
     updateBacktestProgress(currentStatusData.status || {});

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 import secrets
 import time
 from dataclasses import dataclass
@@ -50,6 +51,8 @@ class CoinbaseProduct:
 class CoinbaseAdvancedClient:
     base_url = "https://api.coinbase.com"
     request_host = "api.coinbase.com"
+    _MAX_RETRIES = 4
+    _MAX_PAGES = 200
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -87,10 +90,21 @@ class CoinbaseAdvancedClient:
 
     def _request(self, method: str, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
-        resp = requests.request(method, url, headers=self._build_headers(method, path), params=params, timeout=60)
-        if resp.status_code >= 400:
-            raise APIClientError(f"Coinbase API error {resp.status_code}: {resp.text[:400]}")
-        return resp.json()
+        last_exc: Exception | None = None
+        for attempt in range(self._MAX_RETRIES):
+            try:
+                resp = requests.request(method, url, headers=self._build_headers(method, path), params=params, timeout=60)
+                if resp.status_code == 429 or 500 <= resp.status_code < 600:
+                    last_exc = APIClientError(f"Coinbase API error {resp.status_code}: {resp.text[:400]}")
+                    time.sleep(min(2 ** attempt, 5) + random.random() * 0.05)
+                    continue
+                if resp.status_code >= 400:
+                    raise APIClientError(f"Coinbase API error {resp.status_code}: {resp.text[:400]}")
+                return resp.json()
+            except requests.RequestException as exc:
+                last_exc = exc
+                time.sleep(min(2 ** attempt, 5) + random.random() * 0.05)
+        raise APIClientError(f"Coinbase API: max retries exhausted. Last: {last_exc}")
 
     def list_products(self) -> list[dict[str, Any]]:
         if self.mock_mode:
@@ -98,7 +112,8 @@ class CoinbaseAdvancedClient:
         path = "/api/v3/brokerage/products"
         cursor = None
         out: list[dict[str, Any]] = []
-        while True:
+        pages = 0
+        while pages < self._MAX_PAGES:
             params = {
                 "product_type": "SPOT",
                 "get_tradability_status": "true",
@@ -112,6 +127,9 @@ class CoinbaseAdvancedClient:
             cursor = payload.get("pagination", {}).get("next_cursor")
             if not payload.get("pagination", {}).get("has_next"):
                 break
+            pages += 1
+        else:
+            raise APIClientError(f"Coinbase pagination exceeded {self._MAX_PAGES} pages — sticky cursor?")
         return out
 
     def get_candles(
@@ -212,6 +230,7 @@ class CoinbaseAdvancedClient:
         rng = pd.date_range(start=start, end=end, freq="1h", inclusive="left", tz="UTC")
         seed = sum(ord(x) for x in f"{provider}:{symbol}") % (2**32 - 1)
         rs = np.random.default_rng(seed)
+        base = symbol.split("-")[0] if "-" in symbol else symbol.split("_")[-2]
         base_price = {
             "BTC": 95000.0,
             "ETH": 4500.0,
@@ -219,17 +238,17 @@ class CoinbaseAdvancedClient:
             "ADA": 1.05,
             "DOGE": 0.22,
             "XRP": 0.85,
-        }[symbol.split("-")[0] if "-" in symbol else symbol.split("_")[-2]]
+        }.get(base, 100.0)
         drift = 0.0008 if provider == "coinapi" else 0.0006
         noise = rs.normal(drift, 0.02, size=len(rng))
         price = base_price * np.exp(np.cumsum(noise / 6.0))
         close = pd.Series(price, index=rng)
+        if provider == "coinapi":
+            close = close * (1 + rs.normal(0.0, 0.0015, size=len(rng)))
         open_ = close.shift(1).fillna(close.iloc[0] * (1 - 0.002))
         high = pd.concat([open_, close], axis=1).max(axis=1) * (1 + rs.uniform(0.0005, 0.01, size=len(rng)))
         low = pd.concat([open_, close], axis=1).min(axis=1) * (1 - rs.uniform(0.0005, 0.01, size=len(rng)))
         volume = np.abs(rs.normal(1.0, 0.25, size=len(rng))) * (1500 if base_price < 10 else 150)
-        if provider == "coinapi":
-            close = close * (1 + rs.normal(0.0, 0.0015, size=len(rng)))
         df = pd.DataFrame(
             {
                 "ts": rng,
@@ -250,6 +269,7 @@ class CoinbaseAdvancedClient:
 
 class CoinAPIClient:
     base_url = "https://rest.coinapi.io"
+    _MAX_RETRIES = 4
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -267,10 +287,21 @@ class CoinAPIClient:
         api_key = self.settings.coinapi_api_key or ""
         headers = {"X-CoinAPI-Key": api_key, "Authorization": api_key}
         url = f"{self.base_url}{path}"
-        resp = requests.get(url, headers=headers, params=params, timeout=60)
-        if resp.status_code >= 400:
-            raise APIClientError(f"CoinAPI error {resp.status_code}: {resp.text[:400]}")
-        return resp.json()
+        last_exc: Exception | None = None
+        for attempt in range(self._MAX_RETRIES):
+            try:
+                resp = requests.get(url, headers=headers, params=params, timeout=60)
+                if resp.status_code == 429 or 500 <= resp.status_code < 600:
+                    last_exc = APIClientError(f"CoinAPI error {resp.status_code}: {resp.text[:400]}")
+                    time.sleep(min(2 ** attempt, 5) + random.random() * 0.05)
+                    continue
+                if resp.status_code >= 400:
+                    raise APIClientError(f"CoinAPI error {resp.status_code}: {resp.text[:400]}")
+                return resp.json()
+            except requests.RequestException as exc:
+                last_exc = exc
+                time.sleep(min(2 ** attempt, 5) + random.random() * 0.05)
+        raise APIClientError(f"CoinAPI: max retries exhausted. Last: {last_exc}")
 
     def list_symbols(self) -> list[dict[str, Any]]:
         if self.mock_mode:

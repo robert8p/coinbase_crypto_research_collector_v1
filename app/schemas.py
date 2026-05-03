@@ -25,7 +25,7 @@ class RuleCondition(BaseModel):
 
 
 class RuleEvalRequest(BaseModel):
-    rule_name: str = "rule_eval"
+    rule_name: str = Field(default="rule_eval", pattern=r"^[A-Za-z0-9][A-Za-z0-9_\-]{0,63}$")
     conditions: list[RuleCondition] = Field(default_factory=list)
     expression: str | None = None
     scopes: list[Literal["coinbase_only", "coinbase_plus_coinapi", "full_scope"]] = Field(
@@ -39,3 +39,10 @@ class RuleBacktestRequest(BaseModel):
     selection_mode: Literal["selected", "all"] = "selected"
     run_mode: Literal["individual", "collective", "both"] = "individual"
     horizon: Literal["h1", "h4", "h24", "auto"] = "h4"
+
+
+class LiveShadowRequest(DataPullRequest):
+    rule_ids: list[str] = Field(default_factory=list)
+    selection_mode: Literal["selected", "all"] = "selected"
+    refresh_references: bool = True
+    as_of_time_iso: str | None = None

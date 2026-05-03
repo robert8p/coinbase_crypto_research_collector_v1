@@ -1,4 +1,4 @@
-# Coinbase Crypto Research Collector v1.1.1
+# Coinbase Crypto Research Collector v1.3.0
 
 A FastAPI research app for collecting a Coinbase-defined spot crypto universe, mapping it to CoinAPI symbols, computing compact research features, and exporting comparison-ready datasets that preserve feature provenance.
 
@@ -31,6 +31,7 @@ It does that by keeping feature families separated and exportable across three s
 - Produces data-quality and comparative-insight reports.
 - Runs the same simple rule across multiple feature scopes.
 - Backtests the attached merged rule library on historic feature data with selectable horizons, individual/collective execution modes, progress reporting, result tables, and downloadable result packs.
+- Runs live shadow validation on the latest completed hourly bar, freezes signal snapshots, and resolves H1/H4/H24 outcomes over later cycles with downloadable live validation packs.
 
 ## Main endpoints
 
@@ -49,6 +50,8 @@ It does that by keeping feature families separated and exportable across three s
 - `/api/rule-backtests/library`
 - `/api/rule-backtests/run`
 - `/api/rule-backtests/latest`
+- `/api/live/shadow/run`
+- `/api/live/shadow/latest`
 - `/download/{filename}`
 
 ## Important implementation choices

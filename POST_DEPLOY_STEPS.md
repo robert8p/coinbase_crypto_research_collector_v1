@@ -123,3 +123,25 @@ Use it like this:
 5. Download the generated `rule_backtest_pack__<run_id>.zip` and upload it back for review.
 
 The pack contains summary tables, matched-row extracts, and the exact selection payload used for the run.
+
+
+## 11) Live shadow validation
+
+The app now supports read-only live shadow validation.
+
+Use it like this:
+
+1. Go to the **Live** tab.
+2. Set Live lookback hours and Live max products.
+3. Select direct rules on the Rules tab, or choose to run all direct rules.
+4. Run a live shadow cycle.
+5. Download the latest `live_validation_pack__<run_id>.zip` after completion.
+
+What it does:
+- refreshes live bars for the selected universe
+- computes the latest feature snapshot
+- evaluates selected direct rules on the latest completed hourly bar
+- appends new live signals to a persistent signal log
+- resolves any matured H1/H4/H24 outcomes from prior signals
+
+Important: this is still shadow validation, not trade execution.

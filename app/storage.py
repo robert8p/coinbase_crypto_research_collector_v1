@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import threading
 from datetime import datetime, timezone
+from json import JSONDecodeError
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 
@@ -26,6 +29,8 @@ class StorageManager:
         self.summary_path = self.settings.export_dir / "run_summary.json"
         self.latest_manifest_path = self.settings.state_dir / "latest_run_manifest.json"
         self.latest_rule_backtest_manifest_path = self.settings.state_dir / "latest_rule_backtest_manifest.json"
+        self.latest_live_shadow_manifest_path = self.settings.state_dir / "latest_live_shadow_manifest.json"
+        self._status_lock = threading.Lock()
 
     def dataset_path(self, name: str, processed: bool = True) -> Path:
         base = self.settings.processed_dir if processed else self.settings.raw_dir
@@ -38,15 +43,42 @@ class StorageManager:
     def export_path(self, name: str, suffix: str) -> Path:
         return self.settings.export_dir / f"{name}{suffix}"
 
+    def _atomic_write(self, target: Path, mode: str, writer: Callable[[Any], None], *, encoding: str | None = None) -> Path:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        suffix = ''.join(target.suffixes) if target.suffixes else target.suffix
+        tmp = target.with_name(f"{target.name}.tmp") if suffix else target.with_suffix('.tmp')
+        try:
+            with tmp.open(mode, encoding=encoding) as handle:
+                writer(handle)
+            os.replace(tmp, target)
+            return target
+        finally:
+            if tmp.exists():
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+
     def write_frame(self, df: pd.DataFrame, name: str, processed: bool = True) -> Path:
         path = self.dataset_path(name, processed=processed)
+        parquet_tmp = path.with_name(f"{path.name}.tmp")
         try:
-            df.to_parquet(path, index=False)
+            df.to_parquet(parquet_tmp, index=False)
+            os.replace(parquet_tmp, path)
             return path
         except (ImportError, ModuleNotFoundError, ValueError):
             pickle_path = self.pickle_dataset_path(name, processed=processed)
-            df.to_pickle(pickle_path)
+            pickle_tmp = pickle_path.with_name(f"{pickle_path.name}.tmp")
+            df.to_pickle(pickle_tmp)
+            os.replace(pickle_tmp, pickle_path)
             return pickle_path
+        finally:
+            for tmp in (parquet_tmp, self.pickle_dataset_path(name, processed=processed).with_name(f"{self.pickle_dataset_path(name, processed=processed).name}.tmp")):
+                if tmp.exists():
+                    try:
+                        tmp.unlink()
+                    except OSError:
+                        pass
 
     def read_frame(self, name: str, processed: bool = True) -> pd.DataFrame:
         path = self.dataset_path(name, processed=processed)
@@ -65,22 +97,25 @@ class StorageManager:
     def write_csv(self, df: pd.DataFrame, name: str, compress: bool = False) -> Path:
         suffix = ".csv.gz" if compress else ".csv"
         path = self.export_path(name, suffix)
-        df.to_csv(path, index=False, compression="gzip" if compress else None)
+        kwargs = {"index": False}
+        if compress:
+            kwargs["compression"] = "gzip"
+        self._atomic_write(path, "wb" if compress else "w", lambda handle: df.to_csv(handle, **kwargs), encoding=None if compress else "utf-8")
         return path
 
     def write_json(self, payload: Any, path: Path | None = None) -> Path:
         target = path or self.summary_path
-        with target.open("w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2, default=str)
-        return target
+        return self._atomic_write(target, "w", lambda f: json.dump(payload, f, indent=2, default=str), encoding="utf-8")
 
     def read_json(self, path: Path | None = None) -> dict[str, Any]:
         target = path or self.status_path
         if not target.exists():
             return {}
-        with target.open("r", encoding="utf-8") as f:
-            return json.load(f)
-
+        try:
+            with target.open("r", encoding="utf-8") as f:
+                return json.load(f)
+        except JSONDecodeError:
+            return {}
 
     def make_run_id(self) -> str:
         return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -116,6 +151,12 @@ class StorageManager:
     def read_latest_rule_backtest_manifest(self) -> dict[str, Any]:
         return self.read_json(self.latest_rule_backtest_manifest_path)
 
+    def write_latest_live_shadow_manifest(self, payload: dict[str, Any]) -> Path:
+        return self.write_json(payload, self.latest_live_shadow_manifest_path)
+
+    def read_latest_live_shadow_manifest(self) -> dict[str, Any]:
+        return self.read_json(self.latest_live_shadow_manifest_path)
+
     def list_latest_run_artifacts(self) -> list[dict[str, Any]]:
         manifest = self.read_latest_manifest()
         artifacts = manifest.get("artifacts", []) if isinstance(manifest, dict) else []
@@ -124,19 +165,20 @@ class StorageManager:
         return self.list_exports()
 
     def update_status(self, step: str, status: str, **extra: Any) -> dict[str, Any]:
-        payload = self.read_json(self.status_path)
-        payload.setdefault("steps", {})
-        payload["app"] = self.settings.app_name
-        payload["version"] = self.settings.app_version
-        payload["updated_at"] = datetime.now(timezone.utc).isoformat()
-        step_state = payload["steps"].get(step, {}).copy()
-        if status in {"running", "completed"}:
-            step_state.pop("error", None)
-            step_state.pop("traceback", None)
-        step_state.update({"status": status, **extra, "updated_at": payload["updated_at"]})
-        payload["steps"][step] = step_state
-        self.write_json(payload, self.status_path)
-        return payload
+        with self._status_lock:
+            payload = self.read_json(self.status_path)
+            payload.setdefault("steps", {})
+            payload["app"] = self.settings.app_name
+            payload["version"] = self.settings.app_version
+            payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+            step_state = payload["steps"].get(step, {}).copy()
+            if status in {"running", "completed", "queued"}:
+                step_state.pop("error", None)
+                step_state.pop("traceback", None)
+            step_state.update({"status": status, **extra, "updated_at": payload["updated_at"]})
+            payload["steps"][step] = step_state
+            self.write_json(payload, self.status_path)
+            return payload
 
     def list_exports(self) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []

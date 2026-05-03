@@ -10,7 +10,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_name: str = "coinbase_crypto_research_collector"
-    app_version: str = "1.2.0"
+    app_version: str = "1.4.0"
+    live_shadow_lookback_hours: int = 72
+    live_shadow_max_products: int = 50
+    live_shadow_auto_refresh_references: bool = True
     data_dir: Path = Path("./runtime/data")
     output_dir_name: str = "exports"
     raw_dir_name: str = "raw"

@@ -470,11 +470,20 @@ class ResearchPipeline:
             rows.append({"check_name": "coinbase_duplicate_timestamps", "severity": "error", "object_id": "coinbase_bars", "metric_value": float(dupes), "status": "fail" if dupes else "pass", "notes": ""})
             non_positive = int(((cb[["open", "high", "low", "close"]] <= 0).any(axis=1)).sum())
             rows.append({"check_name": "coinbase_non_positive_prices", "severity": "error", "object_id": "coinbase_bars", "metric_value": float(non_positive), "status": "fail" if non_positive else "pass", "notes": ""})
-            tz_ok = int(pd.to_datetime(cb["ts"], utc=True).dt.tz is not None)
-            rows.append({"check_name": "coinbase_timezone_consistency", "severity": "error", "object_id": "coinbase_bars", "metric_value": float(tz_ok), "status": "pass" if tz_ok else "fail", "notes": "UTC expected"})
+            ordering_violations = int((((cb["close"] > cb["high"]) | (cb["close"] < cb["low"]) | (cb["open"] > cb["high"]) | (cb["open"] < cb["low"]))).sum())
+            rows.append({"check_name": "coinbase_ohlcv_ordering", "severity": "error", "object_id": "coinbase_bars", "metric_value": float(ordering_violations), "status": "fail" if ordering_violations else "pass", "notes": "open/close must remain within high/low"})
+            raw_ts = cb["ts"]
+            if pd.api.types.is_datetime64_any_dtype(raw_ts):
+                raw_tz = getattr(raw_ts.dt, "tz", None)
+                tz_ok = int(raw_tz is not None and str(raw_tz) == "UTC")
+            else:
+                tz_ok = 0
+            rows.append({"check_name": "coinbase_timezone_consistency", "severity": "error", "object_id": "coinbase_bars", "metric_value": float(tz_ok), "status": "pass" if tz_ok else "fail", "notes": "raw ts must be tz-aware UTC"})
         if not ca.empty:
             dupes = ca.duplicated(["coinbase_product_id", "ts"]).sum()
             rows.append({"check_name": "coinapi_duplicate_timestamps", "severity": "error", "object_id": "coinapi_bars", "metric_value": float(dupes), "status": "fail" if dupes else "pass", "notes": ""})
+            ordering_violations = int((((ca["close"] > ca["high"]) | (ca["close"] < ca["low"]) | (ca["open"] > ca["high"]) | (ca["open"] < ca["low"]))).sum())
+            rows.append({"check_name": "coinapi_ohlcv_ordering", "severity": "error", "object_id": "coinapi_bars", "metric_value": float(ordering_violations), "status": "fail" if ordering_violations else "pass", "notes": "open/close must remain within high/low"})
         if not cb.empty and not ca.empty:
             cb_counts = cb.groupby("product_id").size().rename("cb_rows")
             ca_counts = ca.groupby("coinbase_product_id").size().rename("ca_rows")
