@@ -262,6 +262,16 @@ def api_rule_backtest_library_live_eligibility(payload: dict) -> dict:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@app.post("/api/rule-backtests/library/live-eligibility/auto")
+def api_rule_backtest_library_live_eligibility_auto(payload: dict | None = None) -> dict:
+    try:
+        payload = payload or {}
+        rule_ids = payload.get("rule_ids") or None
+        return rule_backtest_service.apply_live_candidate_policy(rule_ids=rule_ids)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 @app.post("/api/rule-backtests/run")
 def api_rule_backtests_run(payload: RuleBacktestRequest) -> dict:
     try:

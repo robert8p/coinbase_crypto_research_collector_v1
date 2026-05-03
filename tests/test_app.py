@@ -378,7 +378,7 @@ def test_status_and_latest_exports_reflect_effective_run_settings_and_versioned_
     status_payload = client.get('/api/status').json()
     assert status_payload['effective_run_settings']['lookback_hours'] == 72
     assert status_payload['effective_run_settings']['max_products'] == 5
-    assert status_payload['latest_run']['app_version'] == '1.6.0'
+    assert status_payload['latest_run']['app_version'] == '1.6.1'
 
     latest = client.get('/api/export/latest').json()
     names = {item['name'] for item in latest['artifacts']}
@@ -422,7 +422,7 @@ def test_rule_backtest_library_and_run(tmp_path: Path):
     latest = client.get('/api/rule-backtests/latest')
     assert latest.status_code == 200
     latest_payload = latest.json()
-    assert latest_payload['version'] == '1.6.0'
+    assert latest_payload['version'] == '1.6.1'
     assert latest_payload['request']['horizon'] == 'h4'
 
 
@@ -565,13 +565,13 @@ def test_live_shadow_cycle_and_latest_manifest(tmp_path: Path):
     })
     assert run_resp.status_code == 200
     payload = run_resp.json()
-    assert payload['version'] == '1.6.0'
+    assert payload['version'] == '1.6.1'
     assert payload['status'] == 'queued'
 
     latest = client.get('/api/live/shadow/latest')
     assert latest.status_code == 200
     latest_payload = latest.json()
-    assert latest_payload['version'] == '1.6.0'
+    assert latest_payload['version'] == '1.6.1'
     assert latest_payload['request']['lookback_hours'] == 72
     assert any(item['name'].startswith('live_validation_pack__') for item in latest_payload['artifacts'])
 
@@ -604,7 +604,7 @@ def test_live_shadow_resolve_outcomes_accepts_tz_aware_signal_ts(tmp_path: Path)
     from app.pipeline import ResearchPipeline
 
     settings = Settings(data_dir=tmp_path / "runtime_data", use_mock_data=True)
-    settings.app_version = "1.6.0"
+    settings.app_version = "1.6.1"
     storage = StorageManager(settings)
     rule_service = RuleBacktestService(storage=storage)
     pipeline = ResearchPipeline(settings)
@@ -665,13 +665,13 @@ def test_live_rule_eligibility_update_and_scan_manifest(tmp_path: Path):
     assert run_resp.status_code == 200
     payload = run_resp.json()
     assert payload['status'] == 'queued'
-    assert payload['version'] == '1.6.0'
+    assert payload['version'] == '1.6.1'
     queued_run_id = payload['run_id']
 
     latest = client.get('/api/live/scan/latest')
     assert latest.status_code == 200
     latest_payload = latest.json()
-    assert latest_payload['version'] == '1.6.0'
+    assert latest_payload['version'] == '1.6.1'
     assert latest_payload['run_id'] == queued_run_id
     assert latest_payload['request']['lookback_hours'] == 72
     assert latest_payload['summary']['rule_hits'] > 0
@@ -743,3 +743,25 @@ def test_rule_backtest_condition_mask_coerces_string_value_for_comparison_operat
     assert mask is not None
     assert metadata['value'] == 0.0
     assert int(mask.sum()) > 0
+
+def test_rule_library_exposes_live_candidate_recommendations(tmp_path: Path):
+    client = build_client(tmp_path)
+    rules = client.get('/api/rule-backtests/library').json()['rules']
+    by_id = {rule['merged_rule_id']: rule for rule in rules}
+    assert by_id['UPDATED_RULE_001']['live_candidate_recommended'] is True
+    assert by_id['UPDATED_TEST_001']['rule_kind'] == 'analysis_test'
+    assert by_id['UPDATED_TEST_001']['live_candidate_recommended'] is False
+    assert by_id['MERGED_RULE_003']['live_candidate_recommended'] is False
+
+
+def test_auto_apply_recommended_live_set_updates_live_eligibility(tmp_path: Path):
+    client = build_client(tmp_path)
+    resp = client.post('/api/rule-backtests/library/live-eligibility/auto', json={})
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert 'recommended_live_rule_ids' in payload
+    rules = client.get('/api/rule-backtests/library').json()['rules']
+    by_id = {rule['merged_rule_id']: rule for rule in rules}
+    assert by_id['UPDATED_RULE_001']['live_eligible'] is True
+    assert by_id['UPDATED_TEST_001']['live_eligible'] is False
+    assert by_id['MERGED_RULE_003']['live_eligible'] is False

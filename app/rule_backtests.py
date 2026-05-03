@@ -41,6 +41,27 @@ ROUTING_PREDICTOR_ALIASES = {
     "BTC/ETH regime state": ["cx_btc_regime_flag", "cx_eth_regime_flag"],
 }
 
+CURATED_LIVE_RECOMMENDED_RULE_IDS = {
+    "UPDATED_RULE_001",
+    "UPDATED_RULE_002",
+    "UPDATED_RULE_005",
+    "UPDATED_RULE_006",
+    "MERGED_RULE_001",
+    "MERGED_RULE_002",
+    "MERGED_RULE_005",
+    "MERGED_RULE_006",
+    "MERGED_RULE_007",
+    "MERGED_RULE_009",
+    "MERGED_RULE_010",
+}
+CURATED_LIVE_EXCLUDED_RULE_IDS = {
+    "MERGED_RULE_003",
+    "MERGED_RULE_004",
+    "MERGED_RULE_008",
+    "UPDATED_RULE_003",
+    "UPDATED_RULE_004",
+}
+
 
 @dataclass
 class RuleBacktestService:
@@ -132,14 +153,17 @@ class RuleBacktestService:
         for rule_id, fields in overrides.items():
             if rule_id in merged and isinstance(fields, dict):
                 merged[rule_id].update(fields)
+        rules = [merged[rule_id] for rule_id in order]
         return {
             "artifact_type": "merged_rule_library",
-            "schema_version": "1.2",
-            "candidate_rules": [merged[rule_id] for rule_id in order],
+            "schema_version": "1.3",
+            "candidate_rules": rules,
             "counts": {
                 "builtin": len(builtin.get("candidate_rules", [])),
                 "custom": len(custom.get("candidate_rules", [])),
                 "combined": len(order),
+                "live_eligible": sum(1 for rule in rules if bool(rule.get("live_eligible", False))),
+                "live_candidate_recommended": sum(1 for rule in rules if bool(rule.get("live_candidate_recommended", False))),
             },
         }
 
@@ -190,6 +214,25 @@ class RuleBacktestService:
             return "execution_test"
         return "direct_rule"
 
+    def _infer_live_candidate_recommendation(self, out: dict[str, Any]) -> tuple[bool, str]:
+        explicit = out.get("live_candidate_recommended")
+        if explicit is not None:
+            return bool(explicit), str(out.get("live_candidate_reason") or "explicit_rule_setting")
+        rule_id = str(out.get("merged_rule_id") or out.get("rule_id") or out.get("test_id") or out.get("id") or "")
+        if rule_id in CURATED_LIVE_RECOMMENDED_RULE_IDS:
+            return True, "curated_true_live_candidate"
+        if rule_id in CURATED_LIVE_EXCLUDED_RULE_IDS:
+            return False, "curated_experimental_or_secondary"
+        if out.get("rule_kind") != "direct_rule":
+            return False, "non_direct_rule"
+        if out.get("test_id") or rule_id.startswith(("TEST_", "UPDATED_TEST_", "EXEC_TEST_")):
+            return False, "test_or_execution_item"
+        if out.get("parent_rule") or out.get("candidate_routing_predictors_to_test"):
+            return False, "routing_or_subclass_hypothesis"
+        if out.get("applies_to"):
+            return False, "execution_bundle"
+        return True, "direct_rule_default"
+
     def _normalize_rule(self, rule: dict[str, Any], source_library: str = "custom") -> dict[str, Any]:
         out = dict(rule)
         if "exact_definition" not in out and "exact_definition_variants" not in out and "all_conditions" in out:
@@ -220,7 +263,10 @@ class RuleBacktestService:
         out["why_interesting"] = out.get("why_interesting") or out.get("hypothesis") or out.get("routing_objective") or "Uploaded custom rule"
         out["source_library"] = source_library
         out["rule_kind"] = self._infer_rule_kind(out)
-        out["live_eligible"] = bool(out.get("live_eligible", out["rule_kind"] == "direct_rule"))
+        recommended, reason = self._infer_live_candidate_recommendation(out)
+        out["live_candidate_recommended"] = bool(recommended)
+        out["live_candidate_reason"] = str(reason)
+        out["live_eligible"] = bool(out.get("live_eligible", recommended))
         return out
 
     def _extract_rules_from_payload(self, payload: Any) -> list[dict[str, Any]]:
@@ -237,9 +283,9 @@ class RuleBacktestService:
                     synthetic.setdefault("name", item.get("test_id") or item.get("name") or "FOLLOW_UP_TEST")
                     if item.get("definition"):
                         synthetic["exact_definition"] = item["definition"]
-                        synthetic["rule_kind"] = "direct_rule"
-                    else:
-                        synthetic["rule_kind"] = "analysis_test"
+                    synthetic["rule_kind"] = "analysis_test"
+                    synthetic["live_candidate_recommended"] = False
+                    synthetic["live_candidate_reason"] = "follow_up_or_orthogonality_test"
                     extracted.append(synthetic)
             if "execution_tests" in payload and isinstance(payload["execution_tests"], list):
                 for item in payload["execution_tests"]:
@@ -334,6 +380,8 @@ class RuleBacktestService:
                     "source_library": rule.get("source_library", "builtin"),
                     "rule_kind": rule.get("rule_kind", "direct_rule"),
                     "live_eligible": bool(rule.get("live_eligible", False)),
+                    "live_candidate_recommended": bool(rule.get("live_candidate_recommended", False)),
+                    "live_candidate_reason": rule.get("live_candidate_reason"),
                     "has_variants": bool(rule.get("exact_definition_variants")) or bool(rule.get("exact_definition", {}).get("quantiles_to_test")),
                     "why_interesting": rule.get("why_interesting"),
                 }
@@ -366,6 +414,42 @@ class RuleBacktestService:
             "status": "completed",
             "updated_rule_ids": sorted(set(rule_ids)),
             "live_eligible": bool(live_eligible),
+            "counts": combined.get("counts", {}),
+        }
+
+    def apply_live_candidate_policy(self, rule_ids: list[str] | None = None) -> dict[str, Any]:
+        library = self.list_rules()
+        target_rules = [rule for rule in library if not rule_ids or rule.get("merged_rule_id") in set(rule_ids)]
+        if not target_rules:
+            raise ValueError("No rules available for automatic live-candidate selection.")
+        payload = self._read_rule_overrides()
+        overrides = payload.setdefault("rule_overrides", {})
+        updated_ids: list[str] = []
+        recommended_ids: list[str] = []
+        excluded_ids: list[str] = []
+        for rule in target_rules:
+            rule_id = str(rule.get("merged_rule_id"))
+            recommended = bool(rule.get("live_candidate_recommended", False))
+            current = overrides.get(rule_id, {}) if isinstance(overrides.get(rule_id), dict) else {}
+            current["live_eligible"] = recommended
+            overrides[rule_id] = current
+            updated_ids.append(rule_id)
+            (recommended_ids if recommended else excluded_ids).append(rule_id)
+        self._write_rule_overrides(payload)
+        combined = self._combined_library()
+        self.storage.update_status(
+            "rule_library_live_eligibility",
+            "completed",
+            message="Applied recommended live-candidate policy",
+            updated_rule_ids=sorted(set(updated_ids)),
+            recommended_live_rule_ids=sorted(set(recommended_ids)),
+            excluded_live_rule_ids=sorted(set(excluded_ids)),
+        )
+        return {
+            "status": "completed",
+            "updated_rule_ids": sorted(set(updated_ids)),
+            "recommended_live_rule_ids": sorted(set(recommended_ids)),
+            "excluded_live_rule_ids": sorted(set(excluded_ids)),
             "counts": combined.get("counts", {}),
         }
 

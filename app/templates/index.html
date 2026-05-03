@@ -1078,12 +1078,23 @@
                         <option value="direct_rule">Direct rules</option>
                         <option value="routing_hypothesis">Routing hypotheses</option>
                         <option value="execution_test">Execution tests</option>
-                        <option value="follow_up_test">Follow-up tests</option>
+                        <option value="analysis_test">Analysis / follow-up tests</option>
+                      </select>
+                    </div>
+                    <div style="min-width: 190px;">
+                      <label for="ruleRecommendationFilter" class="sr-only">Filter by live recommendation</label>
+                      <select id="ruleRecommendationFilter">
+                        <option value="all">All live recommendations</option>
+                        <option value="recommended">Recommended live candidates</option>
+                        <option value="not_recommended">Not recommended for live scan</option>
+                        <option value="live_eligible">Currently live eligible</option>
                       </select>
                     </div>
                   </div>
                   <div class="rule-toolbar-right">
                     <button class="btn-soft" onclick="selectVisibleRules()">Select visible</button>
+                    <button class="btn-soft" onclick="selectRecommendedRules()">Select recommended</button>
+                    <button class="btn-ghost" onclick="applyRecommendedLiveSet()">Auto-apply recommended live set</button>
                     <button class="btn-ghost" onclick="clearRuleSelection()">Clear selection</button>
                     <button class="btn-ghost" onclick="loadRuleLibrary(true)">Reload library</button>
                   </div>
@@ -1099,6 +1110,8 @@
                   <div class="button-row">
                     <button class="btn-primary" onclick="switchTab('backtesting')">Go to backtesting</button>
                     <button class="btn-ghost" onclick="copySelectedRuleIds()">Copy selected IDs</button>
+                    <button class="btn-soft" onclick="setSelectedRulesLiveEligibility(true)">Mark selected live eligible</button>
+                    <button class="btn-ghost" onclick="setSelectedRulesLiveEligibility(false)">Remove selected from live scan</button>
                   </div>
                 </div>
                 <div class="preview-block">
@@ -1971,10 +1984,12 @@
       const builtin = ruleLibrary.filter(rule => rule.source_library !== 'custom').length;
       const custom = ruleLibrary.filter(rule => rule.source_library === 'custom').length;
       const liveEligible = ruleLibrary.filter(rule => rule.rule_kind === 'direct_rule' && rule.live_eligible).length;
+      const recommended = ruleLibrary.filter(rule => !!rule.live_candidate_recommended).length;
       setHtml('ruleLibraryPills', `
         <span class="pill soft">${ruleLibrary.length} total</span>
         <span class="pill neutral">${builtin} bundled</span>
         <span class="pill neutral">${custom} custom</span>
+        <span class="pill neutral">${recommended} recommended live candidates</span>
         <span class="pill neutral">${liveEligible} live eligible</span>
       `);
     }
@@ -1984,17 +1999,21 @@
         search: el('ruleSearch').value.trim().toLowerCase(),
         source: el('ruleSourceFilter').value,
         kind: el('ruleKindFilter').value,
+        recommendation: el('ruleRecommendationFilter').value,
       };
     }
 
     function filteredRuleLibrary() {
-      const {search, source, kind} = currentRuleFilters();
+      const {search, source, kind, recommendation} = currentRuleFilters();
       return ruleLibrary.filter(rule => {
         const sourceLibrary = rule.source_library === 'custom' ? 'custom' : 'builtin';
         const ruleKind = rule.rule_kind || 'direct_rule';
         const haystack = [rule.merged_rule_id || rule.rule_id || rule.test_id, rule.name, rule.family_id, sourceLibrary, ruleKind].join(' ').toLowerCase();
         if (source !== 'all' && sourceLibrary !== source) return false;
         if (kind !== 'all' && ruleKind !== kind) return false;
+        if (recommendation === 'recommended' && !rule.live_candidate_recommended) return false;
+        if (recommendation === 'not_recommended' && rule.live_candidate_recommended) return false;
+        if (recommendation === 'live_eligible' && !rule.live_eligible) return false;
         if (search && !haystack.includes(search)) return false;
         return true;
       });
@@ -2008,9 +2027,11 @@
       const selected = persistedSelectedRuleIds();
       const rules = filteredRuleLibrary();
       const liveEligibleVisible = rules.filter(rule => rule.live_eligible).length;
+      const recommendedVisible = rules.filter(rule => rule.live_candidate_recommended).length;
       const summaryHtml = `
         <span class="pill soft">${rules.length} visible</span>
         <span class="pill neutral">${selected.size} selected</span>
+        <span class="pill neutral">${recommendedVisible} visible recommended</span>
         <span class="pill neutral">${liveEligibleVisible} visible live eligible</span>
       `;
       setHtml('ruleLibrarySummary', summaryHtml);
@@ -2025,6 +2046,9 @@
         const sourceClass = rule.source_library === 'custom' ? 'custom' : '';
         const horizons = (rule.target_horizons || []).join(', ') || rule.target_horizon || rule.recommended_primary_horizon || 'auto';
         const liveEligibleBadge = rule.live_eligible ? '<span class="badge">live eligible</span>' : '<span class="badge kind">not live</span>';
+        const recommendationBadge = rule.live_candidate_recommended
+          ? '<span class="badge soft">recommended live candidate</span>'
+          : '<span class="badge kind">not recommended</span>';
         return `
           <label class="rule-item ${selectedClass}" data-rule-id="${htmlEscape(id)}">
             <input type="checkbox" class="rule-checkbox" value="${htmlEscape(id)}" ${selected.has(id) ? 'checked' : ''} onchange="saveSelectedRuleIds(); applyRuleSelectionStyling();" />
@@ -2032,6 +2056,7 @@
               <div class="rule-item-title">
                 <span class="badge ${sourceClass}">${htmlEscape(rule.source_library || 'builtin')}</span>
                 <span class="badge kind">${htmlEscape(rule.rule_kind || 'direct_rule')}</span>
+                ${recommendationBadge}
                 ${liveEligibleBadge}
                 <span class="rule-id">${htmlEscape(id)}</span>
               </div>
@@ -2065,7 +2090,8 @@
       const names = selectedIds.slice(0, 3).map(id => ruleLibrary.find(rule => ruleIdentity(rule) === id)?.name || id);
       const suffix = selectedIds.length > 3 ? ` + ${selectedIds.length - 3} more` : '';
       const liveEligibleSelected = selectedIds.filter(id => { const rule = ruleLibrary.find(item => ruleIdentity(item) === id); return rule?.rule_kind === 'direct_rule' && rule?.live_eligible; }).length;
-      setText('selectedRuleSummary', `${selectedIds.length} selected · ${liveEligibleSelected} live eligible · ${names.join(' · ')}${suffix}`);
+      const recommendedSelected = selectedIds.filter(id => { const rule = ruleLibrary.find(item => ruleIdentity(item) === id); return !!rule?.live_candidate_recommended; }).length;
+      setText('selectedRuleSummary', `${selectedIds.length} selected · ${recommendedSelected} recommended · ${liveEligibleSelected} live eligible · ${names.join(' · ')}${suffix}`);
     }
 
     function updateBacktestConfigSummary() {
@@ -2098,6 +2124,7 @@
           <div><strong>${htmlEscape(rule.name || 'Untitled rule')}</strong></div>
           <div class="meta">${htmlEscape(ruleIdentity(rule))} · ${htmlEscape(rule.rule_kind || 'direct_rule')}</div>
           <div class="meta">Source attribution: ${htmlEscape((rule.source_attribution || []).join(', ') || '—')}</div>
+          <div class="meta">Live recommendation: ${htmlEscape(rule.live_candidate_recommended ? 'recommended live candidate' : 'not recommended')} · ${htmlEscape(rule.live_candidate_reason || '—')}</div>
           <div>${htmlEscape(rule.hypothesis || rule.why_interesting || 'No description available.')}</div>
           <div class="meta">Primary horizon: ${htmlEscape(rule.recommended_primary_horizon || rule.target_horizon || (rule.target_horizons || []).join(', ') || 'auto')}</div>
           ${checks ? `<div><strong>Required checks</strong><ul style="margin:8px 0 0 18px; color: var(--muted);">${checks}</ul></div>` : ''}
@@ -2109,6 +2136,30 @@
       document.querySelectorAll('.rule-checkbox').forEach(box => { box.checked = true; });
       saveSelectedRuleIds();
       applyRuleSelectionStyling();
+    }
+
+    function selectRecommendedRules() {
+      const recommendedIds = new Set(filteredRuleLibrary().filter(rule => !!rule.live_candidate_recommended).map(rule => ruleIdentity(rule)));
+      document.querySelectorAll('.rule-checkbox').forEach(box => { box.checked = recommendedIds.has(box.value); });
+      saveSelectedRuleIds();
+      applyRuleSelectionStyling();
+      setMessage('ruleUploadBox', `Selected ${recommendedIds.size} recommended live-candidate rule(s).`);
+      switchTab('rules');
+    }
+
+    async function applyRecommendedLiveSet() {
+      const selectedIds = getSelectedRuleIds();
+      const payload = selectedIds.length ? {rule_ids: selectedIds} : {};
+      const response = await fetch('/api/rule-backtests/library/live-eligibility/auto', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+      setMessage('ruleUploadBox', JSON.stringify(data, null, 2));
+      await loadRuleLibrary(true);
+      await refreshStatus(true);
+      switchTab('rules');
     }
 
     function clearRuleSelection() {
@@ -2536,7 +2587,7 @@
         updateBacktestConfigSummary();
       });
     });
-    ['ruleSearch', 'ruleSourceFilter', 'ruleKindFilter'].forEach(id => {
+    ['ruleSearch', 'ruleSourceFilter', 'ruleKindFilter', 'ruleRecommendationFilter'].forEach(id => {
       el(id).addEventListener('input', renderRuleLibrary);
       el(id).addEventListener('change', renderRuleLibrary);
     });
