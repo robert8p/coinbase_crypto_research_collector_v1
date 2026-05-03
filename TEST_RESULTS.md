@@ -1,19 +1,15 @@
 # Test Results
 
-Version: 1.4.0
+Version: 1.4.1
 
-Command run:
-
-```bash
+Command:
+```
 pytest -q
 ```
 
 Result:
-
-- 27 passed
+- 28 passed
 - 0 failed
 - 0 skipped
 
-Notes:
-- Includes hardening coverage for `/health` effective mock-mode reporting, rule-name traversal rejection, and CoinAPI mock OHLCV ordering.
-- Live shadow execution is now queued via background task and validated through the latest manifest endpoint.
+Generated automatically from the local validation run for v1.4.1.

@@ -378,7 +378,7 @@ def test_status_and_latest_exports_reflect_effective_run_settings_and_versioned_
     status_payload = client.get('/api/status').json()
     assert status_payload['effective_run_settings']['lookback_hours'] == 72
     assert status_payload['effective_run_settings']['max_products'] == 5
-    assert status_payload['latest_run']['app_version'] == '1.4.0'
+    assert status_payload['latest_run']['app_version'] == '1.4.1'
 
     latest = client.get('/api/export/latest').json()
     names = {item['name'] for item in latest['artifacts']}
@@ -422,7 +422,7 @@ def test_rule_backtest_library_and_run(tmp_path: Path):
     latest = client.get('/api/rule-backtests/latest')
     assert latest.status_code == 200
     latest_payload = latest.json()
-    assert latest_payload['version'] == '1.4.0'
+    assert latest_payload['version'] == '1.4.1'
     assert latest_payload['request']['horizon'] == 'h4'
 
 
@@ -565,13 +565,13 @@ def test_live_shadow_cycle_and_latest_manifest(tmp_path: Path):
     })
     assert run_resp.status_code == 200
     payload = run_resp.json()
-    assert payload['version'] == '1.4.0'
+    assert payload['version'] == '1.4.1'
     assert payload['status'] == 'queued'
 
     latest = client.get('/api/live/shadow/latest')
     assert latest.status_code == 200
     latest_payload = latest.json()
-    assert latest_payload['version'] == '1.4.0'
+    assert latest_payload['version'] == '1.4.1'
     assert latest_payload['request']['lookback_hours'] == 72
     assert any(item['name'].startswith('live_validation_pack__') for item in latest_payload['artifacts'])
 
@@ -584,3 +584,60 @@ def test_index_contains_live_shadow_tab_and_controls(tmp_path: Path):
     assert 'data-tab-target="live"' in html
     assert 'Run live cycle for selected rules' in html
     assert '/api/live/shadow/run' in html
+
+
+def test_live_shadow_resolve_outcomes_accepts_tz_aware_signal_ts(tmp_path: Path):
+    import os
+    import sys
+    from datetime import datetime, timezone
+    import pandas as pd
+    import pytest
+
+    os.environ["USE_MOCK_DATA"] = "true"
+    os.environ["DATA_DIR"] = str(tmp_path / "runtime_data")
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+    from app.settings import Settings
+    from app.storage import StorageManager
+    from app.rule_backtests import RuleBacktestService
+    from app.live_shadow import LiveShadowService
+    from app.pipeline import ResearchPipeline
+
+    settings = Settings(data_dir=tmp_path / "runtime_data", use_mock_data=True)
+    settings.app_version = "1.4.1"
+    storage = StorageManager(settings)
+    rule_service = RuleBacktestService(storage=storage)
+    pipeline = ResearchPipeline(settings)
+    service = LiveShadowService(settings=settings, storage=storage, pipeline=pipeline, rule_service=rule_service)
+
+    signal_log = pd.DataFrame([{
+        "signal_id": "sig-1",
+        "signal_ts": pd.Timestamp("2026-05-03T20:00:00+00:00"),
+        "product_id": "BTC-USD",
+        "rule_instance_id": "rule-1",
+        "merged_rule_id": "rule-1",
+        "rule_name": "Rule 1",
+        "signal_price": 100.0,
+    }])
+    existing_outcomes = pd.DataFrame()
+    cb = pd.DataFrame([
+        {"product_id": "BTC-USD", "ts": pd.Timestamp("2026-05-03T20:00:00+00:00"), "close": 100.0, "high": 101.0},
+        {"product_id": "BTC-USD", "ts": pd.Timestamp("2026-05-03T21:00:00+00:00"), "close": 102.0, "high": 103.0},
+        {"product_id": "BTC-USD", "ts": pd.Timestamp("2026-05-04T00:00:00+00:00"), "close": 105.0, "high": 106.0},
+        {"product_id": "BTC-USD", "ts": pd.Timestamp("2026-05-04T20:00:00+00:00"), "close": 110.0, "high": 112.0},
+    ])
+
+    outcomes, resolved = service._resolve_outcomes(
+        signal_log=signal_log,
+        existing_outcomes=existing_outcomes,
+        cb=cb,
+        latest_available_ts=pd.Timestamp("2026-05-04T20:00:00+00:00"),
+        resolved_at=datetime(2026, 5, 4, 20, 5, tzinfo=timezone.utc),
+    )
+
+    assert resolved == 1
+    assert len(outcomes) == 1
+    row = outcomes.iloc[0]
+    assert row["future_close_return_h1"] == pytest.approx(0.02)
+    assert row["future_close_return_h4"] == pytest.approx(0.05)
+    assert row["future_close_return_h24"] == pytest.approx(0.10)

@@ -322,6 +322,12 @@ class LiveShadowService:
         existing_map = existing_outcomes.set_index("signal_id").to_dict("index") if not existing_outcomes.empty else {}
         resolved_count = 0
         rows: list[dict[str, Any]] = []
+        def _coerce_utc_timestamp(value: Any) -> pd.Timestamp:
+            ts = pd.Timestamp(value)
+            if ts.tzinfo is None:
+                return ts.tz_localize("UTC")
+            return ts.tz_convert("UTC")
+
         for _, signal in signal_log.iterrows():
             signal_id = signal["signal_id"]
             row = existing_map.get(signal_id, {"signal_id": signal_id, "signal_ts": signal["signal_ts"], "product_id": signal["product_id"], "rule_instance_id": signal["rule_instance_id"], "merged_rule_id": signal["merged_rule_id"], "rule_name": signal.get("rule_name")})
@@ -335,7 +341,7 @@ class LiveShadowService:
             if bars is None or bars.empty:
                 rows.append(row)
                 continue
-            signal_ts = pd.Timestamp(signal["signal_ts"], tz="UTC")
+            signal_ts = _coerce_utc_timestamp(signal["signal_ts"])
             entry_price = float(signal.get("signal_price") or np.nan)
             if not np.isfinite(entry_price) or entry_price <= 0:
                 rows.append(row)
