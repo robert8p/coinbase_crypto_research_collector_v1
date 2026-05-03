@@ -188,10 +188,13 @@ class LiveShadowService:
 
         feature_df["cs_coinbase_vs_coinapi_close_diff"] = (feature_df["close"] - feature_df.get("ca_close", np.nan)) / feature_df["close"]
         feature_df["cs_coinbase_vs_coinapi_return_diff"] = feature_df["cb_ret_1"] - feature_df.get("ca_ret_1", np.nan)
-        feature_df["cs_cross_source_divergence_flag"] = (
+        both_present = feature_df["cs_coinbase_vs_coinapi_close_diff"].notna() & feature_df["cs_coinbase_vs_coinapi_return_diff"].notna()
+        divergence = (
             (feature_df["cs_coinbase_vs_coinapi_close_diff"].abs() >= self.settings.divergence_threshold)
             | (feature_df["cs_coinbase_vs_coinapi_return_diff"].abs() >= self.settings.divergence_threshold)
-        ).astype(int)
+        )
+        feature_df["cs_cross_source_divergence_state"] = np.where(both_present, divergence.astype(int), -1)
+        feature_df["cs_cross_source_divergence_flag"] = np.where(both_present, divergence.astype(int), 0)
         feature_df["ex_min_size_constraint_flag"] = (
             feature_df["base_min_size"].fillna(0) * feature_df["close"].fillna(0) > self.settings.min_notional_reference_usd
         ).astype(int)
@@ -271,6 +274,7 @@ class LiveShadowService:
                         "rule_name": instance.get("name"),
                         "variant_id": instance.get("variant_id"),
                         "family_id": instance.get("family_id"),
+                        "priority": instance.get("priority"),
                         "source_library": instance.get("source_library", "builtin"),
                         "source_attribution": "|".join(instance.get("source_attribution", [])),
                         "recommended_primary_horizon": instance.get("recommended_primary_horizon"),

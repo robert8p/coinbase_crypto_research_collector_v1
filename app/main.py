@@ -9,9 +9,10 @@ from fastapi import Request
 
 from .pipeline import ResearchPipeline
 from .live_shadow import LiveShadowService
+from .live_scanner import LiveScannerService
 from .rule_backtests import RuleBacktestService
 from .rule_eval import RuleEvaluationService
-from .schemas import DataPullRequest, ExportBuildRequest, LiveShadowRequest, PipelineRunRequest, RuleBacktestRequest, RuleEvalRequest
+from .schemas import DataPullRequest, ExportBuildRequest, LiveScanRequest, LiveShadowRequest, PipelineRunRequest, RuleBacktestRequest, RuleEvalRequest
 from .settings import get_settings
 from .storage import StorageManager
 
@@ -21,6 +22,7 @@ pipeline = ResearchPipeline(settings)
 rule_service = RuleEvaluationService(storage)
 rule_backtest_service = RuleBacktestService(storage)
 live_shadow_service = LiveShadowService(settings, storage, pipeline, rule_backtest_service)
+live_scan_service = LiveScannerService(settings, storage, live_shadow_service, rule_backtest_service)
 
 app = FastAPI(title=settings.app_name, version=settings.app_version)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -40,6 +42,7 @@ def index(request: Request) -> HTMLResponse:
             "exports": storage.list_latest_run_artifacts(),
             "latest_rule_backtest": storage.read_latest_rule_backtest_manifest(),
             "latest_live_shadow": storage.read_latest_live_shadow_manifest(),
+            "latest_live_scan": storage.read_latest_live_scan_manifest(),
             "rule_library": {"rules": rule_backtest_service.list_rules()},
         },
     )
@@ -68,6 +71,7 @@ def api_status() -> dict:
     latest_manifest = storage.read_latest_manifest()
     latest_rule_backtest = storage.read_latest_rule_backtest_manifest()
     latest_live_shadow = storage.read_latest_live_shadow_manifest()
+    latest_live_scan = storage.read_latest_live_scan_manifest()
     return {
         "status": storage.read_json(storage.status_path),
         "exports": storage.list_latest_run_artifacts(),
@@ -78,6 +82,10 @@ def api_status() -> dict:
             "coinapi_period_id": settings.coinapi_period_id,
             "top_n_by_volume": settings.top_n_by_volume,
             "max_universe_size": settings.max_universe_size,
+            "live_shadow_lookback_hours": settings.live_shadow_lookback_hours,
+            "live_shadow_max_products": settings.live_shadow_max_products,
+            "live_scan_lookback_hours": settings.live_scan_lookback_hours,
+            "live_scan_max_products": settings.live_scan_max_products,
             "mock_mode": settings.use_mock_data,
         },
         "effective_run_settings": latest_manifest.get("effective_run_settings", {}),
@@ -101,6 +109,15 @@ def api_status() -> dict:
             "summary": latest_live_shadow.get("summary", {}),
             "artifacts": latest_live_shadow.get("artifacts", []),
             "summary_rows": latest_live_shadow.get("summary_rows", []),
+        },
+        "latest_live_scan": {
+            "run_id": latest_live_scan.get("run_id"),
+            "generated_at": latest_live_scan.get("generated_at"),
+            "app_version": latest_live_scan.get("version"),
+            "request": latest_live_scan.get("request", {}),
+            "summary": latest_live_scan.get("summary", {}),
+            "artifacts": latest_live_scan.get("artifacts", []),
+            "preview": latest_live_scan.get("preview", []),
         },
     }
 
@@ -235,6 +252,16 @@ async def api_rule_backtest_library_upload(files: list[UploadFile] = File(defaul
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@app.post("/api/rule-backtests/library/live-eligibility")
+def api_rule_backtest_library_live_eligibility(payload: dict) -> dict:
+    try:
+        rule_ids = payload.get("rule_ids") or []
+        live_eligible = bool(payload.get("live_eligible", True))
+        return rule_backtest_service.update_live_eligibility(rule_ids=rule_ids, live_eligible=live_eligible)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 @app.post("/api/rule-backtests/run")
 def api_rule_backtests_run(payload: RuleBacktestRequest) -> dict:
     try:
@@ -246,6 +273,28 @@ def api_rule_backtests_run(payload: RuleBacktestRequest) -> dict:
 @app.get("/api/rule-backtests/latest")
 def api_rule_backtests_latest() -> dict:
     return storage.read_latest_rule_backtest_manifest()
+
+
+@app.post("/api/live/scan/run")
+def api_live_scan_run(payload: LiveScanRequest, background_tasks: BackgroundTasks) -> dict:
+    try:
+        run_id = storage.make_run_id()
+        storage.update_status(
+            "live_scan_cycle",
+            "queued",
+            message="Live scanner queued",
+            run_id=run_id,
+            phase="queued",
+        )
+        background_tasks.add_task(live_scan_service.run_cycle, payload, run_id)
+        return {"run_id": run_id, "status": "queued", "version": settings.app_version}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/live/scan/latest")
+def api_live_scan_latest() -> dict:
+    return live_scan_service.latest_manifest()
 
 
 @app.post("/api/live/shadow/run")

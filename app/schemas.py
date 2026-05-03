@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class DataPullRequest(BaseModel):
@@ -33,6 +33,12 @@ class RuleEvalRequest(BaseModel):
     )
     target_column: str = "future_close_return_h4"
 
+    @field_validator("scopes")
+    @classmethod
+    def _dedup_scopes(cls, v: list[str]) -> list[str]:
+        return list(dict.fromkeys(v))
+
+
 
 class RuleBacktestRequest(BaseModel):
     rule_ids: list[str] = Field(default_factory=list)
@@ -44,5 +50,12 @@ class RuleBacktestRequest(BaseModel):
 class LiveShadowRequest(DataPullRequest):
     rule_ids: list[str] = Field(default_factory=list)
     selection_mode: Literal["selected", "all"] = "selected"
-    refresh_references: bool = True
+    refresh_references: bool | None = True
+    as_of_time_iso: str | None = None
+
+
+class LiveScanRequest(DataPullRequest):
+    rule_ids: list[str] = Field(default_factory=list)
+    selection_mode: Literal["selected", "all"] = "selected"
+    refresh_references: bool | None = True
     as_of_time_iso: str | None = None

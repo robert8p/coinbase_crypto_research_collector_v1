@@ -30,6 +30,7 @@ class StorageManager:
         self.latest_manifest_path = self.settings.state_dir / "latest_run_manifest.json"
         self.latest_rule_backtest_manifest_path = self.settings.state_dir / "latest_rule_backtest_manifest.json"
         self.latest_live_shadow_manifest_path = self.settings.state_dir / "latest_live_shadow_manifest.json"
+        self.latest_live_scan_manifest_path = self.settings.state_dir / "latest_live_scan_manifest.json"
         self._status_lock = threading.Lock()
 
     def dataset_path(self, name: str, processed: bool = True) -> Path:
@@ -156,6 +157,13 @@ class StorageManager:
 
     def read_latest_live_shadow_manifest(self) -> dict[str, Any]:
         return self.read_json(self.latest_live_shadow_manifest_path)
+
+
+    def write_latest_live_scan_manifest(self, payload: dict[str, Any]) -> Path:
+        return self.write_json(payload, self.latest_live_scan_manifest_path)
+
+    def read_latest_live_scan_manifest(self) -> dict[str, Any]:
+        return self.read_json(self.latest_live_scan_manifest_path)
 
     def list_latest_run_artifacts(self) -> list[dict[str, Any]]:
         manifest = self.read_latest_manifest()

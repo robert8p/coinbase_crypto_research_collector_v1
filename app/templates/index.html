@@ -239,6 +239,7 @@
     .span-6 { grid-column: span 6; }
     .span-5 { grid-column: span 5; }
     .span-4 { grid-column: span 4; }
+    .span-3 { grid-column: span 3; }
 
     .card {
       background: var(--surface);
@@ -780,7 +781,8 @@
       .span-7,
       .span-6,
       .span-5,
-      .span-4 { grid-column: span 12; }
+      .span-4,
+      .span-3 { grid-column: span 12; }
       .rule-layout { grid-template-columns: 1fr; }
       .hero-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
@@ -868,6 +870,7 @@
         <button class="tab" role="tab" aria-selected="false" data-tab-target="data" onclick="switchTab('data')">Data collection</button>
         <button class="tab" role="tab" aria-selected="false" data-tab-target="rules" onclick="switchTab('rules')">Rules</button>
         <button class="tab" role="tab" aria-selected="false" data-tab-target="backtesting" onclick="switchTab('backtesting')">Backtesting</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab-target="scan" onclick="switchTab('scan')">Scan</button>
         <button class="tab" role="tab" aria-selected="false" data-tab-target="live" onclick="switchTab('live')">Live</button>
         <button class="tab" role="tab" aria-selected="false" data-tab-target="results" onclick="switchTab('results')">Results</button>
         <button class="tab" role="tab" aria-selected="false" data-tab-target="diagnostics" onclick="switchTab('diagnostics')">Diagnostics</button>
@@ -1196,6 +1199,102 @@
 
 
 
+    <section class="tab-panel" data-tab-panel="scan">
+      <div class="panel-stack">
+        <div class="panel-grid">
+          <div class="card span-5">
+            <div class="card-header">
+              <div>
+                <h2>Live scanner</h2>
+                <p class="section-copy">Run a live market scan on the latest completed hourly snapshot. The scanner evaluates only live-eligible direct rules and returns a ranked shortlist of matching coins.</p>
+              </div>
+              <span class="pill soft">Latest snapshot only</span>
+            </div>
+            <div class="controls">
+              <div>
+                <label for="liveScanLookbackHours">Scan lookback hours</label>
+                <input id="liveScanLookbackHours" type="number" min="24" step="24" />
+              </div>
+              <div>
+                <label for="liveScanMaxProducts">Scan max products</label>
+                <input id="liveScanMaxProducts" type="number" min="1" step="1" />
+              </div>
+            </div>
+            <div class="callout info" style="margin-top: 12px;" id="liveScanConfigSummary">Choose live-eligible direct rules on the Rules tab or run all live-eligible direct rules. The scan refreshes the latest bars, computes the latest completed snapshot, evaluates live rules, ranks the shortlist, and writes a downloadable scan pack.</div>
+            <div class="button-row" style="margin-top: 14px;">
+              <button class="btn-primary" onclick="runLiveScan('selected')">Scan selected live-eligible rules</button>
+              <button class="btn-secondary" onclick="runLiveScan('all')">Scan all live-eligible rules</button>
+            </div>
+            <div class="helper" style="margin-top: 12px;">The live scanner is decision support only. It does not execute trades and it excludes non-direct or non-live-eligible rules by default.</div>
+          </div>
+
+          <div class="card span-7">
+            <div class="card-header">
+              <div>
+                <h2>Scanner progress</h2>
+                <p class="section-copy">See queue/running/completed state, latest run ID, and the current scan stage.</p>
+              </div>
+              <button class="btn-ghost" onclick="fetchLiveScanManifest(true)">Refresh scan status</button>
+            </div>
+            <div class="progress-shell">
+              <div class="progress"><div id="liveScanProgressBar" class="progress-bar"></div></div>
+              <div class="progress-meta">
+                <span id="liveScanProgressLabel">No live scan running.</span>
+                <span id="liveScanProgressDetail">—</span>
+              </div>
+            </div>
+            <div class="status-strip" id="liveScanStatusStrip" style="margin-top: 12px;"></div>
+            <pre id="liveScanBox" class="feedback-box" style="margin-top: 12px;">No live scan run yet.</pre>
+          </div>
+        </div>
+
+        <div class="panel-grid">
+          <div class="card span-4">
+            <div class="card-header">
+              <div>
+                <h2>Latest scan snapshot</h2>
+                <p class="section-copy">Quick facts from the latest live scan run.</p>
+              </div>
+            </div>
+            <div class="metric-grid" id="liveScanMetrics"></div>
+          </div>
+
+          <div class="card span-8">
+            <div class="card-header">
+              <div>
+                <h2>Ranked shortlist</h2>
+                <p class="section-copy">Coins where one or more live-eligible direct rules fired on the latest completed hourly snapshot.</p>
+              </div>
+            </div>
+            <div class="table-shell">
+              <div class="scroll-x">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Rank</th>
+                      <th>Coin</th>
+                      <th>Rules matched</th>
+                      <th>Rule IDs</th>
+                      <th>Primary horizons</th>
+                      <th>Best priority</th>
+                      <th>Score</th>
+                      <th>CB 1h</th>
+                      <th>CA 1h</th>
+                      <th>CS diff</th>
+                      <th>DQ</th>
+                    </tr>
+                  </thead>
+                  <tbody id="liveScanTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="download-list" id="liveScanArtifacts" style="margin-top: 12px;"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
     <section class="tab-panel" data-tab-panel="live">
       <div class="panel-stack">
         <div class="panel-grid">
@@ -1292,7 +1391,7 @@
     <section class="tab-panel" data-tab-panel="results">
       <div class="panel-stack">
         <div class="panel-grid">
-          <div class="card span-4">
+          <div class="card span-3">
             <div class="card-header">
               <div>
                 <h2>Latest research artifacts</h2>
@@ -1302,7 +1401,7 @@
             <div class="download-list" id="resultsRunArtifacts"></div>
           </div>
 
-          <div class="card span-4">
+          <div class="card span-3">
             <div class="card-header">
               <div>
                 <h2>Latest rule-backtest artifacts</h2>
@@ -1312,7 +1411,17 @@
             <div class="download-list" id="latestRuleBacktestArtifacts"></div>
           </div>
 
-          <div class="card span-4">
+          <div class="card span-3">
+            <div class="card-header">
+              <div>
+                <h2>Latest live-scan artifacts</h2>
+                <p class="section-copy">Run-stamped scan shortlist outputs and downloadable packs from the latest live scanner run.</p>
+              </div>
+            </div>
+            <div class="download-list" id="resultsLiveScanArtifacts"></div>
+          </div>
+
+          <div class="card span-3">
             <div class="card-header">
               <div>
                 <h2>Latest live-shadow artifacts</h2>
@@ -1453,6 +1562,7 @@
       exports: {{ exports|tojson }},
       latest_rule_backtest: {{ latest_rule_backtest|tojson }},
       latest_live_shadow: {{ latest_live_shadow|tojson }},
+      latest_live_scan: {{ latest_live_scan|tojson }},
       rule_library: {{ rule_library|tojson }},
       app_name: {{ app_name|tojson }},
       app_version: {{ app_version|tojson }},
@@ -1466,6 +1576,8 @@
       activeTab: 'ccrc.activeTab',
       liveLookbackHours: 'ccrc.liveLookbackHours',
       liveMaxProducts: 'ccrc.liveMaxProducts',
+      liveScanLookbackHours: 'ccrc.liveScanLookbackHours',
+      liveScanMaxProducts: 'ccrc.liveScanMaxProducts',
     };
 
     let pollTimer = null;
@@ -1475,6 +1587,7 @@
       exports: INITIAL_BOOT.exports || [],
       latest_rule_backtest: INITIAL_BOOT.latest_rule_backtest || {},
       latest_live_shadow: INITIAL_BOOT.latest_live_shadow || {},
+      latest_live_scan: INITIAL_BOOT.latest_live_scan || {},
       settings: {},
       effective_run_settings: {},
       latest_run: {},
@@ -1566,6 +1679,8 @@
       localStorage.setItem(STORAGE_KEYS.ruleHorizon, el('ruleHorizon').value);
       localStorage.setItem(STORAGE_KEYS.liveLookbackHours, el('liveLookbackHours').value);
       localStorage.setItem(STORAGE_KEYS.liveMaxProducts, el('liveMaxProducts').value);
+      localStorage.setItem(STORAGE_KEYS.liveScanLookbackHours, el('liveScanLookbackHours').value);
+      localStorage.setItem(STORAGE_KEYS.liveScanMaxProducts, el('liveScanMaxProducts').value);
       localStorage.setItem(STORAGE_KEYS.selectedRuleIds, JSON.stringify(getSelectedRuleIds()));
     }
 
@@ -1603,11 +1718,15 @@
       const savedRuleHorizon = localStorage.getItem(STORAGE_KEYS.ruleHorizon);
       const savedLiveLookback = localStorage.getItem(STORAGE_KEYS.liveLookbackHours);
       const savedLiveMaxProducts = localStorage.getItem(STORAGE_KEYS.liveMaxProducts);
+      const savedLiveScanLookback = localStorage.getItem(STORAGE_KEYS.liveScanLookbackHours);
+      const savedLiveScanMaxProducts = localStorage.getItem(STORAGE_KEYS.liveScanMaxProducts);
       el('lookbackHours').value = savedLookback ?? String(effective.lookback_hours ?? settings.lookback_hours ?? 336);
       el('maxProducts').value = savedMaxProducts ?? String(effective.max_products ?? settings.top_n_by_volume ?? settings.max_universe_size ?? '');
       el('ruleHorizon').value = savedRuleHorizon ?? 'h4';
       el('liveLookbackHours').value = savedLiveLookback ?? String(effective.lookback_hours ?? settings.lookback_hours ?? 720);
       el('liveMaxProducts').value = savedLiveMaxProducts ?? String(effective.max_products ?? settings.top_n_by_volume ?? settings.max_universe_size ?? 150);
+      el('liveScanLookbackHours').value = savedLiveScanLookback ?? String(settings.live_scan_lookback_hours ?? settings.live_shadow_lookback_hours ?? effective.lookback_hours ?? 72);
+      el('liveScanMaxProducts').value = savedLiveScanMaxProducts ?? String(settings.live_scan_max_products ?? settings.live_shadow_max_products ?? effective.max_products ?? 50);
     }
 
     function progressPercent(progressText) {
@@ -1625,6 +1744,7 @@
         ['feature_compute', 'Features'],
         ['export_build', 'Exports'],
         ['rule_backtest', 'Rule backtest'],
+        ['live_scan_cycle', 'Live scan'],
         ['live_shadow_cycle', 'Live shadow'],
       ];
       const html = order.map(([key, label]) => {
@@ -1850,10 +1970,12 @@
     function renderRuleLibraryPills() {
       const builtin = ruleLibrary.filter(rule => rule.source_library !== 'custom').length;
       const custom = ruleLibrary.filter(rule => rule.source_library === 'custom').length;
+      const liveEligible = ruleLibrary.filter(rule => rule.rule_kind === 'direct_rule' && rule.live_eligible).length;
       setHtml('ruleLibraryPills', `
         <span class="pill soft">${ruleLibrary.length} total</span>
         <span class="pill neutral">${builtin} bundled</span>
         <span class="pill neutral">${custom} custom</span>
+        <span class="pill neutral">${liveEligible} live eligible</span>
       `);
     }
 
@@ -1885,9 +2007,11 @@
     function renderRuleLibrary() {
       const selected = persistedSelectedRuleIds();
       const rules = filteredRuleLibrary();
+      const liveEligibleVisible = rules.filter(rule => rule.live_eligible).length;
       const summaryHtml = `
         <span class="pill soft">${rules.length} visible</span>
         <span class="pill neutral">${selected.size} selected</span>
+        <span class="pill neutral">${liveEligibleVisible} visible live eligible</span>
       `;
       setHtml('ruleLibrarySummary', summaryHtml);
       if (!rules.length) {
@@ -1900,6 +2024,7 @@
         const selectedClass = selected.has(id) ? 'selected' : '';
         const sourceClass = rule.source_library === 'custom' ? 'custom' : '';
         const horizons = (rule.target_horizons || []).join(', ') || rule.target_horizon || rule.recommended_primary_horizon || 'auto';
+        const liveEligibleBadge = rule.live_eligible ? '<span class="badge">live eligible</span>' : '<span class="badge kind">not live</span>';
         return `
           <label class="rule-item ${selectedClass}" data-rule-id="${htmlEscape(id)}">
             <input type="checkbox" class="rule-checkbox" value="${htmlEscape(id)}" ${selected.has(id) ? 'checked' : ''} onchange="saveSelectedRuleIds(); applyRuleSelectionStyling();" />
@@ -1907,6 +2032,7 @@
               <div class="rule-item-title">
                 <span class="badge ${sourceClass}">${htmlEscape(rule.source_library || 'builtin')}</span>
                 <span class="badge kind">${htmlEscape(rule.rule_kind || 'direct_rule')}</span>
+                ${liveEligibleBadge}
                 <span class="rule-id">${htmlEscape(id)}</span>
               </div>
               <div class="rule-name">${htmlEscape(rule.name || 'Untitled rule')}</div>
@@ -1938,7 +2064,8 @@
       }
       const names = selectedIds.slice(0, 3).map(id => ruleLibrary.find(rule => ruleIdentity(rule) === id)?.name || id);
       const suffix = selectedIds.length > 3 ? ` + ${selectedIds.length - 3} more` : '';
-      setText('selectedRuleSummary', `${selectedIds.length} selected · ${names.join(' · ')}${suffix}`);
+      const liveEligibleSelected = selectedIds.filter(id => { const rule = ruleLibrary.find(item => ruleIdentity(item) === id); return rule?.rule_kind === 'direct_rule' && rule?.live_eligible; }).length;
+      setText('selectedRuleSummary', `${selectedIds.length} selected · ${liveEligibleSelected} live eligible · ${names.join(' · ')}${suffix}`);
     }
 
     function updateBacktestConfigSummary() {
@@ -2000,6 +2127,115 @@
       navigator.clipboard?.writeText(selectedIds.join('\n'));
       setMessage('ruleUploadBox', `Copied ${selectedIds.length} selected rule IDs.`);
       switchTab('rules');
+    }
+
+    async function setSelectedRulesLiveEligibility(liveEligible) {
+      const selectedIds = getSelectedRuleIds();
+      if (!selectedIds.length) {
+        setMessage('ruleUploadBox', 'Select one or more rules first.');
+        switchTab('rules');
+        return;
+      }
+      const response = await fetch('/api/rule-backtests/library/live-eligibility', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({rule_ids: selectedIds, live_eligible: !!liveEligible}),
+      });
+      const data = await response.json();
+      setMessage('ruleUploadBox', JSON.stringify(data, null, 2));
+      await loadRuleLibrary(true);
+      await refreshStatus(true);
+      switchTab('rules');
+    }
+
+    function renderLiveScanSection(data) {
+      const scan = data.latest_live_scan || {};
+      const summary = scan.summary || {};
+      const request = scan.request || {};
+      const step = data.status?.steps?.live_scan_cycle || {};
+      const metrics = [
+        {label: 'Latest scan run', value: scan.run_id || '—'},
+        {label: 'Shortlist rows', value: fmtNum(summary.shortlist_rows)},
+        {label: 'Rule hits', value: fmtNum(summary.rule_hits)},
+        {label: 'Rules evaluated', value: fmtNum(summary.rules_evaluated)},
+      ];
+      setHtml('liveScanMetrics', metrics.map(item => `<div class="metric"><div class="label">${htmlEscape(item.label)}</div><div class="value">${htmlEscape(item.value)}</div></div>`).join(''));
+      setHtml('liveScanStatusStrip', `
+        <span class="status-chip ${statusClass(step.status)}"><span class="dot"></span>${htmlEscape(step.status || 'idle')}</span>
+        <span class="pill neutral">Latest scan bar: ${htmlEscape(summary.latest_signal_ts || '—')}</span>
+        <span class="pill neutral">Lookback: ${htmlEscape(fmtNum(request.lookback_hours))}h</span>
+        <span class="pill neutral">Universe: ${htmlEscape(fmtNum(request.max_products))} products</span>
+      `);
+      const progress = progressPercent(step.progress);
+      el('liveScanProgressBar').style.width = `${progress}%`;
+      setText('liveScanProgressLabel', step.status === 'running' ? (step.message || 'Running live scan…') : (scan.run_id ? 'Latest live scan completed.' : 'No live scan run yet.'));
+      setText('liveScanProgressDetail', step.progress ? `${step.progress}${step.current_product ? ` · ${step.current_product}` : ''}` : (summary.shortlist_rows != null ? `${fmtNum(summary.shortlist_rows)} shortlist rows` : '—'));
+      setMessage('liveScanBox', JSON.stringify(scan.run_id ? scan : step, null, 2));
+      renderArtifacts(scan.artifacts || [], 'liveScanArtifacts');
+      renderArtifacts(scan.artifacts || [], 'resultsLiveScanArtifacts');
+      const rows = scan.preview || [];
+      const body = rows.map(row => `
+        <tr>
+          <td>${htmlEscape(fmtNum(row.scanner_rank))}</td>
+          <td>${htmlEscape(row.product_id)}</td>
+          <td>${htmlEscape(fmtNum(row.matched_rule_count))}</td>
+          <td>${htmlEscape(row.matched_rule_ids || '')}</td>
+          <td>${htmlEscape(row.matched_primary_horizons || '')}</td>
+          <td>${htmlEscape(fmtNum(row.best_priority))}</td>
+          <td>${row.ranking_score == null ? '—' : Number(row.ranking_score).toFixed(1)}</td>
+          <td>${row.cb_ret_1 == null ? '—' : Number(row.cb_ret_1).toFixed(4)}</td>
+          <td>${row.ca_ret_1 == null ? '—' : Number(row.ca_ret_1).toFixed(4)}</td>
+          <td>${row.cs_coinbase_vs_coinapi_return_diff == null ? '—' : Number(row.cs_coinbase_vs_coinapi_return_diff).toFixed(4)}</td>
+          <td>${htmlEscape(row.data_quality_note || 'ok')}</td>
+        </tr>
+      `).join('');
+      setHtml('liveScanTableBody', body || '<tr><td colspan="11">No live scan matches yet.</td></tr>');
+      const selectedLiveEligible = getSelectedRuleIds().filter(id => { const rule = ruleLibrary.find(item => ruleIdentity(item) === id); return rule?.rule_kind === 'direct_rule' && rule?.live_eligible; }).length;
+      setText('liveScanConfigSummary', selectedLiveEligible ? `${selectedLiveEligible} selected live-eligible direct rules are ready to scan. The scanner evaluates the latest completed hourly snapshot and returns a ranked shortlist of matching coins.` : 'Mark one or more direct rules as live eligible on the Rules tab, or run all live-eligible direct rules. The scanner excludes non-direct and non-live-eligible rules by default.');
+    }
+
+    async function fetchLiveScanManifest(preserveTab = false) {
+      const activeTab = localStorage.getItem(STORAGE_KEYS.activeTab) || 'scan';
+      const response = await fetch('/api/live/scan/latest');
+      const data = await response.json();
+      currentStatusData.latest_live_scan = data || {};
+      renderLiveScanSection(currentStatusData);
+      if (!preserveTab) switchTab(activeTab);
+      return data;
+    }
+
+    async function runLiveScan(selectionMode) {
+      persistControls();
+      const payload = {
+        selection_mode: selectionMode,
+        rule_ids: selectionMode === 'selected' ? getSelectedRuleIds() : [],
+        lookback_hours: parseOptionalNumber(el('liveScanLookbackHours').value),
+        max_products: parseOptionalNumber(el('liveScanMaxProducts').value),
+        refresh_references: true,
+      };
+      if (selectionMode === 'selected') {
+        const liveEligibleSelected = payload.rule_ids.filter(id => { const rule = ruleLibrary.find(item => ruleIdentity(item) === id); return rule?.rule_kind === 'direct_rule' && rule?.live_eligible; });
+        if (!liveEligibleSelected.length) {
+          setMessage('liveScanBox', 'Select at least one live-eligible direct rule first, or run all live-eligible direct rules.');
+          switchTab('rules');
+          return;
+        }
+        payload.rule_ids = liveEligibleSelected;
+      }
+      switchTab('scan');
+      startPolling();
+      setMessage('liveScanBox', 'Live scan started…');
+      const response = await fetch('/api/live/scan/run', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+      stopPolling();
+      currentStatusData.latest_live_scan = data;
+      setMessage('liveScanBox', JSON.stringify(data, null, 2));
+      await refreshStatus(true);
+      renderLiveScanSection(currentStatusData);
     }
 
     function renderLiveSection(data) {
@@ -2117,6 +2353,7 @@
     function renderResultsSections(data) {
       renderArtifacts(data.exports || [], 'resultsRunArtifacts');
       renderArtifacts(data.latest_rule_backtest?.artifacts || [], 'latestRuleBacktestArtifacts');
+      renderArtifacts(data.latest_live_scan?.artifacts || [], 'resultsLiveScanArtifacts');
       renderArtifacts(data.latest_live_shadow?.artifacts || [], 'resultsLiveArtifacts');
       renderArtifacts(data.exports || [], 'overviewLatestArtifacts');
       renderArtifactTable(data.exports || []);
@@ -2141,6 +2378,7 @@
       renderPipelineTimeline(data.status || {});
       renderDataMetrics(data);
       renderResultsSections(data);
+      renderLiveScanSection(data);
       renderLiveSection(data);
       renderWarnings(data);
       renderSettingsTables(data);
@@ -2292,7 +2530,7 @@
       pollTimer = null;
     }
 
-    ['lookbackHours', 'maxProducts', 'ruleHorizon', 'liveLookbackHours', 'liveMaxProducts'].forEach(id => {
+    ['lookbackHours', 'maxProducts', 'ruleHorizon', 'liveLookbackHours', 'liveMaxProducts', 'liveScanLookbackHours', 'liveScanMaxProducts'].forEach(id => {
       el(id).addEventListener('change', () => {
         persistControls();
         updateBacktestConfigSummary();
@@ -2310,6 +2548,7 @@
     renderPipelineTimeline(currentStatusData.status || {});
     renderDataMetrics(currentStatusData);
     renderResultsSections(currentStatusData);
+    renderLiveScanSection(currentStatusData);
     renderLiveSection(currentStatusData);
     renderWarnings(currentStatusData);
     renderSettingsTables(currentStatusData);

@@ -51,6 +51,10 @@ class RuleBacktestService:
     def custom_rule_library_path(self) -> Path:
         return self.storage.settings.state_dir / "custom_rule_library.json"
 
+    @property
+    def rule_overrides_path(self) -> Path:
+        return self.storage.settings.state_dir / "rule_library_overrides.json"
+
     def _resource_paths(self) -> list[Path]:
         return list(self.rule_resource_paths or RULE_RESOURCE_PATHS)
 
@@ -97,6 +101,21 @@ class RuleBacktestService:
         self.custom_rule_library_path.parent.mkdir(parents=True, exist_ok=True)
         self.storage.write_json(payload, self.custom_rule_library_path)
 
+    def _read_rule_overrides(self) -> dict[str, Any]:
+        if not self.rule_overrides_path.exists():
+            return {"rule_overrides": {}}
+        try:
+            with self.rule_overrides_path.open("r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except json.JSONDecodeError:
+            return {"rule_overrides": {}}
+        payload.setdefault("rule_overrides", {})
+        return payload
+
+    def _write_rule_overrides(self, payload: dict[str, Any]) -> None:
+        self.rule_overrides_path.parent.mkdir(parents=True, exist_ok=True)
+        self.storage.write_json(payload, self.rule_overrides_path)
+
     def _combined_library(self) -> dict[str, Any]:
         builtin = self._read_builtin_library()
         custom = self._read_custom_library()
@@ -109,6 +128,10 @@ class RuleBacktestService:
                 if rule_id not in merged:
                     order.append(rule_id)
                 merged[rule_id] = normalized
+        overrides = self._read_rule_overrides().get("rule_overrides", {})
+        for rule_id, fields in overrides.items():
+            if rule_id in merged and isinstance(fields, dict):
+                merged[rule_id].update(fields)
         return {
             "artifact_type": "merged_rule_library",
             "schema_version": "1.2",
@@ -197,6 +220,7 @@ class RuleBacktestService:
         out["why_interesting"] = out.get("why_interesting") or out.get("hypothesis") or out.get("routing_objective") or "Uploaded custom rule"
         out["source_library"] = source_library
         out["rule_kind"] = self._infer_rule_kind(out)
+        out["live_eligible"] = bool(out.get("live_eligible", out["rule_kind"] == "direct_rule"))
         return out
 
     def _extract_rules_from_payload(self, payload: Any) -> list[dict[str, Any]]:
@@ -309,11 +333,41 @@ class RuleBacktestService:
                     "source_attribution": rule.get("source_attribution", []),
                     "source_library": rule.get("source_library", "builtin"),
                     "rule_kind": rule.get("rule_kind", "direct_rule"),
+                    "live_eligible": bool(rule.get("live_eligible", False)),
                     "has_variants": bool(rule.get("exact_definition_variants")) or bool(rule.get("exact_definition", {}).get("quantiles_to_test")),
                     "why_interesting": rule.get("why_interesting"),
                 }
             )
         return out
+
+    def update_live_eligibility(self, rule_ids: list[str], live_eligible: bool) -> dict[str, Any]:
+        if not rule_ids:
+            raise ValueError("Provide at least one rule ID.")
+        library_ids = {rule["merged_rule_id"] for rule in self.list_rules()}
+        missing = sorted(set(rule_ids) - library_ids)
+        if missing:
+            raise ValueError(f"Unknown rule IDs: {', '.join(missing[:10])}")
+        payload = self._read_rule_overrides()
+        overrides = payload.setdefault("rule_overrides", {})
+        for rule_id in rule_ids:
+            current = overrides.get(rule_id, {}) if isinstance(overrides.get(rule_id), dict) else {}
+            current["live_eligible"] = bool(live_eligible)
+            overrides[rule_id] = current
+        self._write_rule_overrides(payload)
+        combined = self._combined_library()
+        self.storage.update_status(
+            "rule_library_live_eligibility",
+            "completed",
+            message="Updated live-eligible rules",
+            updated_rule_ids=sorted(set(rule_ids)),
+            live_eligible=bool(live_eligible),
+        )
+        return {
+            "status": "completed",
+            "updated_rule_ids": sorted(set(rule_ids)),
+            "live_eligible": bool(live_eligible),
+            "counts": combined.get("counts", {}),
+        }
 
     def _prepare_frame(self, df: pd.DataFrame) -> pd.DataFrame:
         out = df.copy()
@@ -394,6 +448,11 @@ class RuleBacktestService:
             value = _numeric_threshold_from_type(str(normalized_condition["threshold_type"]))
             metadata.update({"threshold_type": normalized_condition["threshold_type"], "threshold": value})
         else:
+            if isinstance(value, str) and not isinstance(value, bool):
+                try:
+                    value = float(value)
+                except ValueError:
+                    pass
             metadata["value"] = value
 
         if logic == ">":
@@ -404,12 +463,6 @@ class RuleBacktestService:
             return series < value, metadata
         if logic == "<=":
             return series <= value, metadata
-        if value is not None and not isinstance(value, bool) and isinstance(value, str):
-            try:
-                value = float(value)
-                metadata["value"] = value
-            except ValueError:
-                pass
 
         if logic == "==":
             return series == value, metadata
@@ -433,6 +486,7 @@ class RuleBacktestService:
                         "hypothesis": rule.get("hypothesis"),
                         "source_library": rule.get("source_library", "builtin"),
                         "rule_kind": rule.get("rule_kind", "direct_rule"),
+                        "priority": rule.get("priority"),
                         "recommended_primary_horizon": rule.get("recommended_primary_horizon"),
                         "secondary_monitor_horizon": rule.get("secondary_monitor_horizon"),
                         "target_horizons": rule.get("target_horizons", []),
@@ -456,6 +510,7 @@ class RuleBacktestService:
                         "hypothesis": rule.get("hypothesis"),
                         "source_library": rule.get("source_library", "builtin"),
                         "rule_kind": rule.get("rule_kind", "direct_rule"),
+                        "priority": rule.get("priority"),
                         "recommended_primary_horizon": rule.get("recommended_primary_horizon"),
                         "secondary_monitor_horizon": rule.get("secondary_monitor_horizon"),
                         "target_horizons": rule.get("target_horizons", []),
