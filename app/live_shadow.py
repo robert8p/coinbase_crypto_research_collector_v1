@@ -229,16 +229,26 @@ class LiveShadowService:
         return feature_df[keep_columns]
 
     def _select_rules(self, request: LiveShadowRequest) -> list[dict[str, Any]]:
+        """Select rules for live shadow validation.
+
+        Live shadow should validate the same curated candidate pool used by the
+        scanner by default. Test/audit/routing constructs can still live in the
+        rule library for historical analysis, but they should not contaminate
+        operator live evidence unless explicitly made live-eligible.
+        """
         library = self.rule_service._combined_library().get("candidate_rules", [])
         direct_rules = [rule for rule in library if rule.get("rule_kind", "direct_rule") == "direct_rule"]
+        live_direct_rules = [rule for rule in direct_rules if bool(rule.get("live_eligible", False))]
         if request.selection_mode == "all":
-            return direct_rules
+            if not live_direct_rules:
+                raise ValueError("No live-eligible direct rules were found. Use Rules → Auto-apply recommended live set first.")
+            return live_direct_rules
         selected = set(request.rule_ids)
         if not selected:
-            raise ValueError("Select at least one direct rule or use selection_mode='all'.")
-        rules = [rule for rule in direct_rules if rule.get("merged_rule_id") in selected]
+            raise ValueError("Select at least one live-eligible direct rule or use selection_mode='all'.")
+        rules = [rule for rule in live_direct_rules if rule.get("merged_rule_id") in selected]
         if not rules:
-            raise ValueError("No selected direct rules were found in the rule library.")
+            raise ValueError("No selected live-eligible direct rules were found in the rule library.")
         return rules
 
     def _evaluate_snapshot(self, snapshot: pd.DataFrame, rules: list[dict[str, Any]], run_id: str, decision_time: datetime) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
@@ -334,7 +344,12 @@ class LiveShadowService:
 
         for _, signal in signal_log.iterrows():
             signal_id = signal["signal_id"]
-            row = existing_map.get(signal_id, {"signal_id": signal_id, "signal_ts": signal["signal_ts"], "product_id": signal["product_id"], "rule_instance_id": signal["rule_instance_id"], "merged_rule_id": signal["merged_rule_id"], "rule_name": signal.get("rule_name")})
+            row = dict(existing_map.get(signal_id, {"signal_id": signal_id, "signal_ts": signal["signal_ts"], "product_id": signal["product_id"], "rule_instance_id": signal["rule_instance_id"], "merged_rule_id": signal["merged_rule_id"], "rule_name": signal.get("rule_name")}))
+            # Older outcome rows written before v1.6.2 could lack signal_id after
+            # set_index()/to_dict() or contain NaN signal IDs. Always restamp the
+            # canonical signal_id from the signal log so pending/outcome joins are
+            # accurate.
+            row["signal_id"] = signal_id
             row.setdefault("signal_ts", signal["signal_ts"])
             row.setdefault("product_id", signal["product_id"])
             row.setdefault("rule_instance_id", signal["rule_instance_id"])
@@ -445,8 +460,14 @@ class LiveShadowService:
             signal_path = self.storage.write_csv(signal_log, f"live_signal_log__{run_id}", compress=False)
             outcome_path = self.storage.write_csv(outcomes, f"live_signal_outcomes__{run_id}", compress=False)
             summary_path = self.storage.write_csv(summary_df, f"live_validation_summary__{run_id}", compress=False)
-            pending = signal_log.merge(outcomes[["signal_id", "fully_resolved"]] if not outcomes.empty else pd.DataFrame(columns=["signal_id", "fully_resolved"]), on="signal_id", how="left") if not signal_log.empty else pd.DataFrame(columns=signal_log.columns.tolist() + ['fully_resolved'])
-            pending = pending.loc[pending["fully_resolved"].fillna(False).eq(False)].copy()
+            if signal_log.empty:
+                pending = pd.DataFrame(columns=signal_log.columns.tolist() + ["fully_resolved"])
+            else:
+                outcome_status = outcomes[["signal_id", "fully_resolved"]].copy() if not outcomes.empty and "signal_id" in outcomes.columns else pd.DataFrame(columns=["signal_id", "fully_resolved"])
+                outcome_status = outcome_status.loc[outcome_status["signal_id"].notna()].drop_duplicates(subset=["signal_id"], keep="last")
+                pending = signal_log.merge(outcome_status, on="signal_id", how="left")
+                resolved_bool = pending["fully_resolved"].map(lambda v: bool(v) if not pd.isna(v) else False)
+                pending = pending.loc[~resolved_bool].copy()
             pending_path = self.storage.write_csv(pending, f"live_pending_signals__{run_id}", compress=False)
             manifest = {
                 "generated_at": datetime.now(timezone.utc).isoformat(),
