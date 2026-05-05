@@ -378,7 +378,7 @@ def test_status_and_latest_exports_reflect_effective_run_settings_and_versioned_
     status_payload = client.get('/api/status').json()
     assert status_payload['effective_run_settings']['lookback_hours'] == 72
     assert status_payload['effective_run_settings']['max_products'] == 5
-    assert status_payload['latest_run']['app_version'] == '1.6.1'
+    assert status_payload['latest_run']['app_version'] == '1.6.3'
 
     latest = client.get('/api/export/latest').json()
     names = {item['name'] for item in latest['artifacts']}
@@ -422,7 +422,7 @@ def test_rule_backtest_library_and_run(tmp_path: Path):
     latest = client.get('/api/rule-backtests/latest')
     assert latest.status_code == 200
     latest_payload = latest.json()
-    assert latest_payload['version'] == '1.6.1'
+    assert latest_payload['version'] == '1.6.3'
     assert latest_payload['request']['horizon'] == 'h4'
 
 
@@ -565,13 +565,13 @@ def test_live_shadow_cycle_and_latest_manifest(tmp_path: Path):
     })
     assert run_resp.status_code == 200
     payload = run_resp.json()
-    assert payload['version'] == '1.6.1'
+    assert payload['version'] == '1.6.3'
     assert payload['status'] == 'queued'
 
     latest = client.get('/api/live/shadow/latest')
     assert latest.status_code == 200
     latest_payload = latest.json()
-    assert latest_payload['version'] == '1.6.1'
+    assert latest_payload['version'] == '1.6.3'
     assert latest_payload['request']['lookback_hours'] == 72
     assert any(item['name'].startswith('live_validation_pack__') for item in latest_payload['artifacts'])
 
@@ -604,7 +604,7 @@ def test_live_shadow_resolve_outcomes_accepts_tz_aware_signal_ts(tmp_path: Path)
     from app.pipeline import ResearchPipeline
 
     settings = Settings(data_dir=tmp_path / "runtime_data", use_mock_data=True)
-    settings.app_version = "1.6.1"
+    settings.app_version = "1.6.3"
     storage = StorageManager(settings)
     rule_service = RuleBacktestService(storage=storage)
     pipeline = ResearchPipeline(settings)
@@ -665,13 +665,13 @@ def test_live_rule_eligibility_update_and_scan_manifest(tmp_path: Path):
     assert run_resp.status_code == 200
     payload = run_resp.json()
     assert payload['status'] == 'queued'
-    assert payload['version'] == '1.6.1'
+    assert payload['version'] == '1.6.3'
     queued_run_id = payload['run_id']
 
     latest = client.get('/api/live/scan/latest')
     assert latest.status_code == 200
     latest_payload = latest.json()
-    assert latest_payload['version'] == '1.6.1'
+    assert latest_payload['version'] == '1.6.3'
     assert latest_payload['run_id'] == queued_run_id
     assert latest_payload['request']['lookback_hours'] == 72
     assert latest_payload['summary']['rule_hits'] > 0
@@ -765,3 +765,55 @@ def test_auto_apply_recommended_live_set_updates_live_eligibility(tmp_path: Path
     assert by_id['UPDATED_RULE_001']['live_eligible'] is True
     assert by_id['UPDATED_TEST_001']['live_eligible'] is False
     assert by_id['MERGED_RULE_003']['live_eligible'] is False
+
+
+def test_downloadable_health_and_status_snapshots(tmp_path: Path):
+    client = build_client(tmp_path)
+    client.post('/api/pipeline/run', json={'lookback_hours': 72, 'max_products': 5, 'compress_chatgpt_csv': True})
+
+    health = client.get('/api/health/download')
+    assert health.status_code == 200
+    assert 'attachment; filename="health__' in health.headers.get('content-disposition', '')
+    assert health.json()['status'] == 'ok'
+
+    status = client.get('/api/status/download')
+    assert status.status_code == 200
+    assert 'attachment; filename="status__' in status.headers.get('content-disposition', '')
+    payload = status.json()
+    assert payload['latest_run']['app_version'] == '1.6.3'
+    assert payload['effective_run_settings']['lookback_hours'] == 72
+
+
+def test_operator_snapshot_zip_contains_health_status_and_latest_manifests(tmp_path: Path):
+    import io
+    import json
+    import zipfile
+
+    client = build_client(tmp_path)
+    client.post('/api/pipeline/run', json={'lookback_hours': 72, 'max_products': 5, 'compress_chatgpt_csv': True})
+
+    response = client.get('/api/operator/snapshot/download')
+    assert response.status_code == 200
+    assert response.headers.get('content-type') == 'application/zip'
+    assert 'attachment; filename="operator_snapshot__' in response.headers.get('content-disposition', '')
+
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        names = set(zf.namelist())
+        assert 'health.json' in names
+        assert 'status.json' in names
+        assert 'latest_run_manifest.json' in names
+        assert 'latest_rule_backtest_manifest.json' in names
+        assert 'latest_live_shadow_manifest.json' in names
+        assert 'latest_live_scan_manifest.json' in names
+        status_payload = json.loads(zf.read('status.json').decode('utf-8'))
+        assert status_payload['latest_run']['app_version'] == '1.6.3'
+
+
+def test_index_contains_operator_snapshot_download_controls(tmp_path: Path):
+    client = build_client(tmp_path)
+    response = client.get('/')
+    assert response.status_code == 200
+    html = response.text
+    assert "Download status" in html
+    assert "Download health" in html
+    assert "/api/operator/snapshot/download" in html

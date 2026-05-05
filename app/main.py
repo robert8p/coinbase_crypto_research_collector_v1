@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import io
+import json
+import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from fastapi import Request
 
@@ -29,45 +33,34 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024
 
 
-@app.get("/", response_class=HTMLResponse)
-def index(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(
-        request,
-        "index.html",
-        {
-            "request": request,
-            "app_name": settings.app_name,
-            "app_version": settings.app_version,
-            "status": storage.read_json(storage.status_path),
-            "exports": storage.list_latest_run_artifacts(),
-            "latest_rule_backtest": storage.read_latest_rule_backtest_manifest(),
-            "latest_live_shadow": storage.read_latest_live_shadow_manifest(),
-            "latest_live_scan": storage.read_latest_live_scan_manifest(),
-            "rule_library": {"rules": rule_backtest_service.list_rules()},
-        },
-    )
-
-
-@app.get("/health")
-def health() -> dict:
-    cb_mock = pipeline.coinbase.mock_mode
-    ca_mock = pipeline.coinapi.mock_mode
+def _cache_busting_headers() -> dict[str, str]:
     return {
-        "status": "ok",
-        "app": settings.app_name,
-        "version": settings.app_version,
-        "use_mock_data_flag": settings.use_mock_data,
-        "effective_mock_mode_coinbase": cb_mock,
-        "effective_mock_mode_coinapi": ca_mock,
-        "credentials_configured": {
-            "coinbase": bool(settings.coinbase_api_key_name and settings.coinbase_api_private_key),
-            "coinapi": bool(settings.coinapi_api_key),
-        },
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
     }
 
 
-@app.get("/api/status")
-def api_status() -> dict:
+def _snapshot_suffix() -> str:
+    latest_ids = [
+        storage.read_latest_live_scan_manifest().get("run_id"),
+        storage.read_latest_live_shadow_manifest().get("run_id"),
+        storage.read_latest_rule_backtest_manifest().get("run_id"),
+        storage.read_latest_manifest().get("run_id"),
+    ]
+    for run_id in latest_ids:
+        if run_id:
+            return str(run_id)
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _json_download_response(filename: str, payload: dict) -> Response:
+    headers = _cache_busting_headers()
+    headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return Response(content=json.dumps(payload, indent=2, default=str), media_type="application/json", headers=headers)
+
+
+def _status_payload() -> dict:
     latest_manifest = storage.read_latest_manifest()
     latest_rule_backtest = storage.read_latest_rule_backtest_manifest()
     latest_live_shadow = storage.read_latest_live_shadow_manifest()
@@ -120,6 +113,120 @@ def api_status() -> dict:
             "preview": latest_live_scan.get("preview", []),
         },
     }
+
+
+def _health_payload() -> dict:
+    cb_mock = pipeline.coinbase.mock_mode
+    ca_mock = pipeline.coinapi.mock_mode
+    return {
+        "status": "ok",
+        "app": settings.app_name,
+        "version": settings.app_version,
+        "use_mock_data_flag": settings.use_mock_data,
+        "effective_mock_mode_coinbase": cb_mock,
+        "effective_mock_mode_coinapi": ca_mock,
+        "credentials_configured": {
+            "coinbase": bool(settings.coinbase_api_key_name and settings.coinbase_api_private_key),
+            "coinapi": bool(settings.coinapi_api_key),
+        },
+    }
+
+
+def _operator_snapshot_payload() -> dict:
+    generated_at = datetime.now(timezone.utc).isoformat()
+    return {
+        "generated_at": generated_at,
+        "app": settings.app_name,
+        "version": settings.app_version,
+        "health": _health_payload(),
+        "status": _status_payload(),
+        "latest_manifests": {
+            "latest_run_manifest": storage.read_latest_manifest(),
+            "latest_rule_backtest_manifest": storage.read_latest_rule_backtest_manifest(),
+            "latest_live_shadow_manifest": storage.read_latest_live_shadow_manifest(),
+            "latest_live_scan_manifest": storage.read_latest_live_scan_manifest(),
+        },
+    }
+
+
+def _operator_snapshot_zip_response() -> Response:
+    snapshot = _operator_snapshot_payload()
+    suffix = _snapshot_suffix()
+    readme = (
+        "Operator snapshot bundle for share-back support.\n\n"
+        "Contents:\n"
+        "- health.json: current /health response\n"
+        "- status.json: current /api/status response\n"
+        "- latest_*_manifest.json: latest run manifests for pipeline, backtest, live shadow, and live scan\n"
+        "- operator_snapshot_meta.json: bundle metadata\n"
+    )
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("health.json", json.dumps(snapshot["health"], indent=2, default=str))
+        zf.writestr("status.json", json.dumps(snapshot["status"], indent=2, default=str))
+        for name, payload in snapshot["latest_manifests"].items():
+            zf.writestr(f"{name}.json", json.dumps(payload, indent=2, default=str))
+        zf.writestr(
+            "operator_snapshot_meta.json",
+            json.dumps({
+                "generated_at": snapshot["generated_at"],
+                "app": snapshot["app"],
+                "version": snapshot["version"],
+                "snapshot_suffix": suffix,
+            }, indent=2, default=str),
+        )
+        zf.writestr("README.txt", readme)
+    headers = _cache_busting_headers()
+    headers["Content-Disposition"] = f'attachment; filename="operator_snapshot__{suffix}.zip"'
+    return Response(content=buffer.getvalue(), media_type="application/zip", headers=headers)
+
+
+@app.get("/", response_class=HTMLResponse)
+def index(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "index.html",
+        {
+            "request": request,
+            "app_name": settings.app_name,
+            "app_version": settings.app_version,
+            "status": storage.read_json(storage.status_path),
+            "exports": storage.list_latest_run_artifacts(),
+            "latest_rule_backtest": storage.read_latest_rule_backtest_manifest(),
+            "latest_live_shadow": storage.read_latest_live_shadow_manifest(),
+            "latest_live_scan": storage.read_latest_live_scan_manifest(),
+            "rule_library": {"rules": rule_backtest_service.list_rules()},
+        },
+    )
+
+
+@app.get("/health")
+def health() -> dict:
+    return _health_payload()
+
+
+@app.get("/api/status")
+def api_status() -> dict:
+    return _status_payload()
+
+
+
+
+@app.get("/api/health/download")
+def api_health_download() -> Response:
+    suffix = _snapshot_suffix()
+    return _json_download_response(f"health__{suffix}.json", _health_payload())
+
+
+@app.get("/api/status/download")
+def api_status_download() -> Response:
+    suffix = _snapshot_suffix()
+    return _json_download_response(f"status__{suffix}.json", _status_payload())
+
+
+@app.get("/api/operator/snapshot/download")
+def api_operator_snapshot_download() -> Response:
+    return _operator_snapshot_zip_response()
 
 
 @app.post("/api/universe/refresh")
@@ -337,9 +444,5 @@ def download_file(filename: str):
     return FileResponse(
         path,
         filename=path.name,
-        headers={
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-            "Expires": "0",
-        },
+        headers=_cache_busting_headers(),
     )

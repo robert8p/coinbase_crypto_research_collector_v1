@@ -145,3 +145,13 @@ What it does:
 - resolves any matured H1/H4/H24 outcomes from prior signals
 
 Important: this is still shadow validation, not trade execution.
+
+## 12) Operator snapshot downloads
+
+The Scan, Live, and Diagnostics tabs now include one-click downloads for:
+
+- current health JSON
+- current status JSON
+- an operator snapshot ZIP containing health, status, and the latest manifests
+
+Use these when a run looks wrong, stuck, or unexpectedly empty and you want a precise share-back bundle without manually hunting through tabs.

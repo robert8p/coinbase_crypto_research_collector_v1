@@ -1247,7 +1247,12 @@
                 <h2>Scanner progress</h2>
                 <p class="section-copy">See queue/running/completed state, latest run ID, and the current scan stage.</p>
               </div>
-              <button class="btn-ghost" onclick="fetchLiveScanManifest(true)">Refresh scan status</button>
+              <div class="button-row">
+                <button class="btn-ghost" onclick="fetchLiveScanManifest(true)">Refresh scan status</button>
+                <button class="btn-ghost" onclick="downloadSnapshot('/api/status/download')">Download status</button>
+                <button class="btn-ghost" onclick="downloadSnapshot('/api/health/download')">Download health</button>
+                <button class="btn-soft" onclick="downloadSnapshot('/api/operator/snapshot/download')">Download operator snapshot</button>
+              </div>
             </div>
             <div class="progress-shell">
               <div class="progress"><div id="liveScanProgressBar" class="progress-bar"></div></div>
@@ -1343,7 +1348,12 @@
                 <h2>Live cycle progress</h2>
                 <p class="section-copy">See what the live engine is doing now, the latest run ID, and whether new signals or outcome resolutions were produced.</p>
               </div>
-              <button class="btn-ghost" onclick="fetchLiveManifest(true)">Refresh live status</button>
+              <div class="button-row">
+                <button class="btn-ghost" onclick="fetchLiveManifest(true)">Refresh live status</button>
+                <button class="btn-ghost" onclick="downloadSnapshot('/api/status/download')">Download status</button>
+                <button class="btn-ghost" onclick="downloadSnapshot('/api/health/download')">Download health</button>
+                <button class="btn-soft" onclick="downloadSnapshot('/api/operator/snapshot/download')">Download operator snapshot</button>
+              </div>
             </div>
             <div class="progress-shell">
               <div class="progress"><div id="liveProgressBar" class="progress-bar"></div></div>
@@ -1498,6 +1508,9 @@
               <button class="btn-secondary" onclick="fetchPreview('/api/reports/data-quality', 'reportBox', 'diagnostics')">Load data-quality preview</button>
               <button class="btn-secondary" onclick="fetchPreview('/api/reports/comparative-insight', 'reportBox', 'diagnostics')">Load comparative preview</button>
               <button class="btn-ghost" onclick="runRule()">Run sample scope comparison</button>
+              <button class="btn-ghost" onclick="downloadSnapshot('/api/status/download')">Download status</button>
+              <button class="btn-ghost" onclick="downloadSnapshot('/api/health/download')">Download health</button>
+              <button class="btn-soft" onclick="downloadSnapshot('/api/operator/snapshot/download')">Download operator snapshot</button>
             </div>
             <div class="helper" style="margin-top: 12px;">Use this area when something looks stuck, unexpectedly empty, or different from what you expected. The raw views below remain available, but the warnings panel should surface the important bits first.</div>
           </div>
