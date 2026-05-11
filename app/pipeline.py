@@ -27,6 +27,18 @@ class ResearchPipeline:
         self.coinbase = CoinbaseAdvancedClient(settings)
         self.coinapi = CoinAPIClient(settings)
 
+
+
+    @staticmethod
+    def _frame_to_unique_index_lookup(frame: pd.DataFrame, index_col: str, *, keep: str = "last") -> dict[str, Any]:
+        if frame.empty or index_col not in frame.columns:
+            return {}
+        deduped = frame.loc[frame[index_col].notna()].copy()
+        if deduped.empty:
+            return {}
+        deduped = deduped.drop_duplicates(subset=[index_col], keep=keep)
+        return deduped.set_index(index_col).to_dict("index")
+
     def refresh_universe(self) -> dict[str, Any]:
         step = "universe_refresh"
         self.storage.update_status(step, "running", message="Refreshing Coinbase universe")
@@ -169,7 +181,7 @@ class ResearchPipeline:
             )
             filtered = filtered.sort_values(["pair_key", "exchange_rank", "exchange_id", "symbol_id"])
             best_by_pair = filtered.groupby("pair_key", as_index=False).first()
-            best_lookup = best_by_pair.set_index("pair_key").to_dict("index") if not best_by_pair.empty else {}
+            best_lookup = self._frame_to_unique_index_lookup(best_by_pair, "pair_key", keep="first")
 
             self.storage.update_status(
                 step,
@@ -268,7 +280,7 @@ class ResearchPipeline:
                     na_position="last",
                 )
                 mapping = mapping.drop_duplicates(subset=["coinbase_product_id"], keep="first").reset_index(drop=True)
-            mapping_lookup = mapping.set_index("coinbase_product_id").to_dict("index")
+            mapping_lookup = self._frame_to_unique_index_lookup(mapping, "coinbase_product_id", keep="first")
             total = len(eligible)
             for idx, (_, product) in enumerate(eligible.iterrows(), start=1):
                 product_id = product["product_id"]

@@ -52,6 +52,18 @@ class LiveShadowService:
             return parsed.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
         return datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
 
+
+
+    @staticmethod
+    def _frame_to_unique_index_lookup(frame: pd.DataFrame, index_col: str, *, keep: str = "last") -> dict[str, Any]:
+        if frame.empty or index_col not in frame.columns:
+            return {}
+        deduped = frame.loc[frame[index_col].notna()].copy()
+        if deduped.empty:
+            return {}
+        deduped = deduped.drop_duplicates(subset=[index_col], keep=keep)
+        return deduped.set_index(index_col).to_dict("index")
+
     def _ensure_reference_tables(self, refresh: bool) -> tuple[pd.DataFrame, pd.DataFrame]:
         products = self.storage.read_frame("coinbase_products")
         mapping = self.storage.read_frame("coinapi_symbol_mapping")
@@ -86,7 +98,7 @@ class LiveShadowService:
                 na_position="last",
             )
             mapping = mapping.drop_duplicates(subset=["coinbase_product_id"], keep="first").reset_index(drop=True)
-        mapping_lookup = mapping.set_index("coinbase_product_id").to_dict("index") if not mapping.empty else {}
+        mapping_lookup = self._frame_to_unique_index_lookup(mapping, "coinbase_product_id", keep="first")
 
         cb_frames: list[pd.DataFrame] = []
         ca_frames: list[pd.DataFrame] = []
@@ -333,7 +345,7 @@ class LiveShadowService:
             return existing_outcomes, 0
         cb["ts"] = pd.to_datetime(cb["ts"], utc=True)
         cb_groups = {pid: frame.sort_values("ts").reset_index(drop=True) for pid, frame in cb.groupby("product_id")}
-        existing_map = existing_outcomes.set_index("signal_id").to_dict("index") if not existing_outcomes.empty else {}
+        existing_map = self._frame_to_unique_index_lookup(existing_outcomes, "signal_id", keep="last")
         resolved_count = 0
         rows: list[dict[str, Any]] = []
         def _coerce_utc_timestamp(value: Any) -> pd.Timestamp:

@@ -1,4 +1,4 @@
-Version: 1.6.3
+Version: 1.6.4
 Validation performed:
 - Python compile check passed
 - Manual live-scan matching-path validation passed
@@ -12,7 +12,7 @@ Validation performed:
 - Patched live outcome rows to preserve canonical signal_id for pending joins.
 - Added robust pending-signal filtering for old malformed outcome rows.
 
-## v1.6.3 targeted validation
+## v1.6.4 targeted validation
 - Added downloadable current health/status snapshots for operator share-back.
 - Added downloadable operator snapshot ZIP bundling health, status, and latest manifests.
 - Added UI download buttons for status and health in Scan, Live, and Diagnostics.

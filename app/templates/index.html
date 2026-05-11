@@ -2495,6 +2495,40 @@
       if (nextTab) switchTab(nextTab);
     }
 
+    async function downloadSnapshot(url) {
+      try {
+        setMessage('statusBox', `Downloading snapshot → ${url}`);
+        const response = await fetch(url);
+        if (!response.ok) {
+          let detail = '';
+          try {
+            detail = JSON.stringify(await response.json(), null, 2);
+          } catch {
+            detail = await response.text();
+          }
+          setMessage('statusBox', `download failed → ${url}
+${detail}`);
+          return;
+        }
+        const blob = await response.blob();
+        const disposition = response.headers.get('content-disposition') || '';
+        const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
+        const filename = filenameMatch ? filenameMatch[1] : 'snapshot-download';
+        const href = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = href;
+        anchor.download = filename;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(href);
+        setMessage('statusBox', `downloaded → ${filename}`);
+      } catch (error) {
+        setMessage('statusBox', `download failed → ${url}
+${error}`);
+      }
+    }
+
     async function loadRuleLibrary(preserveTab = false) {
       const activeTab = localStorage.getItem(STORAGE_KEYS.activeTab) || 'rules';
       const response = await fetch('/api/rule-backtests/library');

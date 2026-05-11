@@ -378,7 +378,7 @@ def test_status_and_latest_exports_reflect_effective_run_settings_and_versioned_
     status_payload = client.get('/api/status').json()
     assert status_payload['effective_run_settings']['lookback_hours'] == 72
     assert status_payload['effective_run_settings']['max_products'] == 5
-    assert status_payload['latest_run']['app_version'] == '1.6.3'
+    assert status_payload['latest_run']['app_version'] == '1.6.4'
 
     latest = client.get('/api/export/latest').json()
     names = {item['name'] for item in latest['artifacts']}
@@ -422,7 +422,7 @@ def test_rule_backtest_library_and_run(tmp_path: Path):
     latest = client.get('/api/rule-backtests/latest')
     assert latest.status_code == 200
     latest_payload = latest.json()
-    assert latest_payload['version'] == '1.6.3'
+    assert latest_payload['version'] == '1.6.4'
     assert latest_payload['request']['horizon'] == 'h4'
 
 
@@ -565,13 +565,13 @@ def test_live_shadow_cycle_and_latest_manifest(tmp_path: Path):
     })
     assert run_resp.status_code == 200
     payload = run_resp.json()
-    assert payload['version'] == '1.6.3'
+    assert payload['version'] == '1.6.4'
     assert payload['status'] == 'queued'
 
     latest = client.get('/api/live/shadow/latest')
     assert latest.status_code == 200
     latest_payload = latest.json()
-    assert latest_payload['version'] == '1.6.3'
+    assert latest_payload['version'] == '1.6.4'
     assert latest_payload['request']['lookback_hours'] == 72
     assert any(item['name'].startswith('live_validation_pack__') for item in latest_payload['artifacts'])
 
@@ -665,13 +665,13 @@ def test_live_rule_eligibility_update_and_scan_manifest(tmp_path: Path):
     assert run_resp.status_code == 200
     payload = run_resp.json()
     assert payload['status'] == 'queued'
-    assert payload['version'] == '1.6.3'
+    assert payload['version'] == '1.6.4'
     queued_run_id = payload['run_id']
 
     latest = client.get('/api/live/scan/latest')
     assert latest.status_code == 200
     latest_payload = latest.json()
-    assert latest_payload['version'] == '1.6.3'
+    assert latest_payload['version'] == '1.6.4'
     assert latest_payload['run_id'] == queued_run_id
     assert latest_payload['request']['lookback_hours'] == 72
     assert latest_payload['summary']['rule_hits'] > 0
@@ -780,7 +780,7 @@ def test_downloadable_health_and_status_snapshots(tmp_path: Path):
     assert status.status_code == 200
     assert 'attachment; filename="status__' in status.headers.get('content-disposition', '')
     payload = status.json()
-    assert payload['latest_run']['app_version'] == '1.6.3'
+    assert payload['latest_run']['app_version'] == '1.6.4'
     assert payload['effective_run_settings']['lookback_hours'] == 72
 
 
@@ -806,7 +806,7 @@ def test_operator_snapshot_zip_contains_health_status_and_latest_manifests(tmp_p
         assert 'latest_live_shadow_manifest.json' in names
         assert 'latest_live_scan_manifest.json' in names
         status_payload = json.loads(zf.read('status.json').decode('utf-8'))
-        assert status_payload['latest_run']['app_version'] == '1.6.3'
+        assert status_payload['latest_run']['app_version'] == '1.6.4'
 
 
 def test_index_contains_operator_snapshot_download_controls(tmp_path: Path):
@@ -817,3 +817,72 @@ def test_index_contains_operator_snapshot_download_controls(tmp_path: Path):
     assert "Download status" in html
     assert "Download health" in html
     assert "/api/operator/snapshot/download" in html
+
+
+def test_live_shadow_outcomes_deduplicate_duplicate_signal_ids_before_index_lookup(tmp_path: Path):
+    import pandas as pd
+    import app.main as app_main
+
+    client = build_client(tmp_path)
+    client.post('/api/universe/refresh')
+    client.post('/api/mappings/refresh')
+
+    signal_log = pd.DataFrame([
+        {
+            'signal_id': 'sig-1',
+            'signal_ts': pd.Timestamp('2026-05-01T00:00:00Z'),
+            'product_id': 'BTC-USD',
+            'rule_instance_id': 'rule-1',
+            'merged_rule_id': 'RULE-1',
+            'rule_name': 'Rule 1',
+            'signal_price': 100.0,
+        }
+    ])
+    existing_outcomes = pd.DataFrame([
+        {
+            'signal_id': 'sig-1',
+            'signal_ts': pd.Timestamp('2026-05-01T00:00:00Z'),
+            'product_id': 'BTC-USD',
+            'rule_instance_id': 'rule-1',
+            'merged_rule_id': 'RULE-1',
+            'rule_name': 'Rule 1',
+            'future_close_return_h1': None,
+            'resolved_at': '2026-05-01T01:00:00+00:00',
+        },
+        {
+            'signal_id': 'sig-1',
+            'signal_ts': pd.Timestamp('2026-05-01T00:00:00Z'),
+            'product_id': 'BTC-USD',
+            'rule_instance_id': 'rule-1',
+            'merged_rule_id': 'RULE-1',
+            'rule_name': 'Rule 1',
+            'future_close_return_h1': 0.02,
+            'resolved_at': '2026-05-01T02:00:00+00:00',
+        },
+    ])
+    cb = pd.DataFrame([
+        {'product_id': 'BTC-USD', 'ts': pd.Timestamp('2026-05-01T00:00:00Z'), 'open': 100.0, 'high': 101.0, 'low': 99.0, 'close': 100.0, 'volume': 1.0},
+        {'product_id': 'BTC-USD', 'ts': pd.Timestamp('2026-05-01T01:00:00Z'), 'open': 100.0, 'high': 103.0, 'low': 99.0, 'close': 102.0, 'volume': 1.0},
+        {'product_id': 'BTC-USD', 'ts': pd.Timestamp('2026-05-01T04:00:00Z'), 'open': 102.0, 'high': 104.0, 'low': 101.0, 'close': 103.0, 'volume': 1.0},
+        {'product_id': 'BTC-USD', 'ts': pd.Timestamp('2026-05-02T00:00:00Z'), 'open': 103.0, 'high': 105.0, 'low': 102.0, 'close': 104.0, 'volume': 1.0},
+    ])
+
+    outcomes, resolved = app_main.live_shadow_service._resolve_outcomes(
+        signal_log=signal_log,
+        existing_outcomes=existing_outcomes,
+        cb=cb,
+        latest_available_ts=pd.Timestamp('2026-05-02T00:00:00Z'),
+        resolved_at=pd.Timestamp('2026-05-02T00:00:00Z').to_pydatetime(),
+    )
+
+    assert len(outcomes) == 1
+    assert outcomes.iloc[0]['signal_id'] == 'sig-1'
+    assert abs(float(outcomes.iloc[0]['future_close_return_h1']) - 0.02) < 1e-9
+    assert resolved >= 0
+
+
+def test_index_defines_download_snapshot_helper(tmp_path: Path):
+    client = build_client(tmp_path)
+    response = client.get('/')
+    assert response.status_code == 200
+    assert 'async function downloadSnapshot(url)' in response.text
