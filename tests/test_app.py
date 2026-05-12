@@ -378,7 +378,7 @@ def test_status_and_latest_exports_reflect_effective_run_settings_and_versioned_
     status_payload = client.get('/api/status').json()
     assert status_payload['effective_run_settings']['lookback_hours'] == 72
     assert status_payload['effective_run_settings']['max_products'] == 5
-    assert status_payload['latest_run']['app_version'] == '1.6.4'
+    assert status_payload['latest_run']['app_version'] == '1.6.5'
 
     latest = client.get('/api/export/latest').json()
     names = {item['name'] for item in latest['artifacts']}
@@ -422,7 +422,7 @@ def test_rule_backtest_library_and_run(tmp_path: Path):
     latest = client.get('/api/rule-backtests/latest')
     assert latest.status_code == 200
     latest_payload = latest.json()
-    assert latest_payload['version'] == '1.6.4'
+    assert latest_payload['version'] == '1.6.5'
     assert latest_payload['request']['horizon'] == 'h4'
 
 
@@ -565,13 +565,13 @@ def test_live_shadow_cycle_and_latest_manifest(tmp_path: Path):
     })
     assert run_resp.status_code == 200
     payload = run_resp.json()
-    assert payload['version'] == '1.6.4'
+    assert payload['version'] == '1.6.5'
     assert payload['status'] == 'queued'
 
     latest = client.get('/api/live/shadow/latest')
     assert latest.status_code == 200
     latest_payload = latest.json()
-    assert latest_payload['version'] == '1.6.4'
+    assert latest_payload['version'] == '1.6.5'
     assert latest_payload['request']['lookback_hours'] == 72
     assert any(item['name'].startswith('live_validation_pack__') for item in latest_payload['artifacts'])
 
@@ -665,13 +665,13 @@ def test_live_rule_eligibility_update_and_scan_manifest(tmp_path: Path):
     assert run_resp.status_code == 200
     payload = run_resp.json()
     assert payload['status'] == 'queued'
-    assert payload['version'] == '1.6.4'
+    assert payload['version'] == '1.6.5'
     queued_run_id = payload['run_id']
 
     latest = client.get('/api/live/scan/latest')
     assert latest.status_code == 200
     latest_payload = latest.json()
-    assert latest_payload['version'] == '1.6.4'
+    assert latest_payload['version'] == '1.6.5'
     assert latest_payload['run_id'] == queued_run_id
     assert latest_payload['request']['lookback_hours'] == 72
     assert latest_payload['summary']['rule_hits'] > 0
@@ -780,7 +780,7 @@ def test_downloadable_health_and_status_snapshots(tmp_path: Path):
     assert status.status_code == 200
     assert 'attachment; filename="status__' in status.headers.get('content-disposition', '')
     payload = status.json()
-    assert payload['latest_run']['app_version'] == '1.6.4'
+    assert payload['latest_run']['app_version'] == '1.6.5'
     assert payload['effective_run_settings']['lookback_hours'] == 72
 
 
@@ -806,7 +806,41 @@ def test_operator_snapshot_zip_contains_health_status_and_latest_manifests(tmp_p
         assert 'latest_live_shadow_manifest.json' in names
         assert 'latest_live_scan_manifest.json' in names
         status_payload = json.loads(zf.read('status.json').decode('utf-8'))
-        assert status_payload['latest_run']['app_version'] == '1.6.4'
+        assert status_payload['latest_run']['app_version'] == '1.6.5'
+
+
+def test_status_normalizes_current_app_version_and_marks_stale_failures(tmp_path: Path):
+    import app.main as app_main
+
+    client = build_client(tmp_path)
+    app_main.storage.write_json({
+        'app': app_main.settings.app_name,
+        'version': '1.6.3',
+        'updated_at': '2026-05-11T20:00:00+00:00',
+        'steps': {
+            'live_shadow_cycle': {
+                'status': 'failed',
+                'error': "DataFrame index must be unique for orient='index'.",
+                'updated_at': '2026-05-05T22:05:32.647564+00:00',
+            }
+        },
+    }, app_main.storage.status_path)
+    app_main.storage.write_latest_live_shadow_manifest({
+        'run_id': '20260505T080327Z',
+        'generated_at': '2026-05-05T08:05:33.736141+00:00',
+        'version': '1.6.1',
+        'summary': {},
+        'artifacts': [],
+        'summary_rows': [],
+    })
+
+    payload = client.get('/api/status').json()
+    assert payload['status']['version'] == '1.6.5'
+    step = payload['status']['steps']['live_shadow_cycle']
+    assert step['stale_failure'] is True
+    assert step['latest_manifest_version'] == '1.6.1'
+    assert step['latest_manifest_current_version'] is False
+    assert payload['latest_live_shadow']['is_current_version'] is False
 
 
 def test_index_contains_operator_snapshot_download_controls(tmp_path: Path):

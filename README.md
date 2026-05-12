@@ -1,4 +1,4 @@
-# Coinbase Crypto Research Collector v1.6.4
+# Coinbase Crypto Research Collector v1.6.5
 
 A FastAPI research app for collecting a Coinbase-defined spot crypto universe, mapping it to CoinAPI symbols, computing compact research features, and exporting comparison-ready datasets that preserve feature provenance.
 
@@ -125,6 +125,6 @@ See `DEPLOYMENT.md`, `POST_DEPLOY_STEPS.md`, and `TEST_RESULTS.md`.
 By default, v1.0.1 keeps quote-matching SPOT products even if Coinbase marks them `view_only` or `trading_disabled` for the API key context. Those flags are preserved as metadata for later filtering, but they no longer zero out the research universe by default. Set `STRICT_COINBASE_TRADABILITY_FILTERS=true` if you want to exclude those rows at universe-build time.
 
 
-## v1.6.4
+## v1.6.5
 - Fixed the Diagnostics/Scan/Live snapshot download buttons by wiring the missing browser-side download helper.
 - Hardened live-shadow outcome lookup against duplicate historical signal IDs so stale duplicate rows no longer fail the cycle with `orient='index'` errors.

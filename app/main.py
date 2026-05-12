@@ -60,13 +60,63 @@ def _json_download_response(filename: str, payload: dict) -> Response:
     return Response(content=json.dumps(payload, indent=2, default=str), media_type="application/json", headers=headers)
 
 
+def _normalize_status_state(raw_status: dict | None, *, latest_manifest: dict, latest_rule_backtest: dict, latest_live_shadow: dict, latest_live_scan: dict) -> dict:
+    payload = raw_status.copy() if isinstance(raw_status, dict) else {}
+    payload["app"] = settings.app_name
+    payload["version"] = settings.app_version
+    payload.setdefault("steps", {})
+    payload.setdefault("updated_at", datetime.now(timezone.utc).isoformat())
+
+    related_manifests = {
+        "data_pull": latest_manifest,
+        "feature_compute": latest_manifest,
+        "export_build": latest_manifest,
+        "rule_backtest": latest_rule_backtest,
+        "live_shadow_cycle": latest_live_shadow,
+        "live_scan_cycle": latest_live_scan,
+    }
+    enriched_steps: dict[str, dict] = {}
+    for step_name, step in payload["steps"].items():
+        if not isinstance(step, dict):
+            enriched_steps[step_name] = step
+            continue
+        step_payload = step.copy()
+        manifest = related_manifests.get(step_name, {}) or {}
+        manifest_version = manifest.get("version")
+        manifest_run_id = manifest.get("run_id")
+        manifest_generated_at = manifest.get("generated_at")
+        if manifest_version:
+            step_payload["latest_manifest_version"] = manifest_version
+            step_payload["latest_manifest_current_version"] = manifest_version == settings.app_version
+        if manifest_run_id:
+            step_payload["latest_manifest_run_id"] = manifest_run_id
+        if manifest_generated_at:
+            step_payload["latest_manifest_generated_at"] = manifest_generated_at
+        if step_payload.get("status") == "failed" and manifest_version and manifest_version != settings.app_version:
+            step_payload["stale_failure"] = True
+            step_payload["stale_failure_reason"] = (
+                f"Latest saved result for {step_name} is from app version {manifest_version}; current deployed version is {settings.app_version}."
+            )
+        enriched_steps[step_name] = step_payload
+    payload["steps"] = enriched_steps
+    return payload
+
+
 def _status_payload() -> dict:
     latest_manifest = storage.read_latest_manifest()
     latest_rule_backtest = storage.read_latest_rule_backtest_manifest()
     latest_live_shadow = storage.read_latest_live_shadow_manifest()
     latest_live_scan = storage.read_latest_live_scan_manifest()
+    normalized_status = _normalize_status_state(
+        storage.read_json(storage.status_path),
+        latest_manifest=latest_manifest,
+        latest_rule_backtest=latest_rule_backtest,
+        latest_live_shadow=latest_live_shadow,
+        latest_live_scan=latest_live_scan,
+    )
     return {
-        "status": storage.read_json(storage.status_path),
+        "status": normalized_status,
+        "current_app_version": settings.app_version,
         "exports": storage.list_latest_run_artifacts(),
         "settings": {
             "quote_currencies": settings.quote_currencies,
@@ -93,6 +143,7 @@ def _status_payload() -> dict:
             "app_version": latest_rule_backtest.get("version"),
             "horizon": latest_rule_backtest.get("request", {}).get("horizon"),
             "artifacts": latest_rule_backtest.get("artifacts", []),
+            "is_current_version": latest_rule_backtest.get("version") == settings.app_version if latest_rule_backtest else False,
         },
         "latest_live_shadow": {
             "run_id": latest_live_shadow.get("run_id"),
@@ -102,6 +153,7 @@ def _status_payload() -> dict:
             "summary": latest_live_shadow.get("summary", {}),
             "artifacts": latest_live_shadow.get("artifacts", []),
             "summary_rows": latest_live_shadow.get("summary_rows", []),
+            "is_current_version": latest_live_shadow.get("version") == settings.app_version if latest_live_shadow else False,
         },
         "latest_live_scan": {
             "run_id": latest_live_scan.get("run_id"),
@@ -111,6 +163,7 @@ def _status_payload() -> dict:
             "summary": latest_live_scan.get("summary", {}),
             "artifacts": latest_live_scan.get("artifacts", []),
             "preview": latest_live_scan.get("preview", []),
+            "is_current_version": latest_live_scan.get("version") == settings.app_version if latest_live_scan else False,
         },
     }
 
@@ -183,6 +236,7 @@ def _operator_snapshot_zip_response() -> Response:
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request) -> HTMLResponse:
+    status_payload = _status_payload()
     return templates.TemplateResponse(
         request,
         "index.html",
@@ -190,8 +244,8 @@ def index(request: Request) -> HTMLResponse:
             "request": request,
             "app_name": settings.app_name,
             "app_version": settings.app_version,
-            "status": storage.read_json(storage.status_path),
-            "exports": storage.list_latest_run_artifacts(),
+            "status": status_payload["status"],
+            "exports": status_payload["exports"],
             "latest_rule_backtest": storage.read_latest_rule_backtest_manifest(),
             "latest_live_shadow": storage.read_latest_live_shadow_manifest(),
             "latest_live_scan": storage.read_latest_live_scan_manifest(),

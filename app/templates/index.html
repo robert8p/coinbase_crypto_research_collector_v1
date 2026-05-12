@@ -1941,7 +1941,12 @@
       const warnings = [];
       Object.entries(steps).forEach(([key, step]) => {
         if (step?.status === 'failed' && step?.error) {
-          warnings.push({tone: 'danger', title: `${key} failed`, text: step.error});
+          if (step?.stale_failure) {
+            const reason = step.stale_failure_reason || `Latest saved result is from app version ${step.latest_manifest_version || 'unknown'} while the current deployed version is ${data.current_app_version || INITIAL_BOOT.app_version}. Re-run this workflow before treating the failure as current.`;
+            warnings.push({tone: 'warning', title: `${key} failed on older app version`, text: `${step.error} ${reason}`.trim()});
+          } else {
+            warnings.push({tone: 'danger', title: `${key} failed`, text: step.error});
+          }
         }
       });
       if ((data.exports || []).length === 0) warnings.push({tone: 'warning', title: 'No exports visible yet', text: 'Run the full pipeline or build the research export before expecting downloadable artifacts.'});
