@@ -378,7 +378,7 @@ def test_status_and_latest_exports_reflect_effective_run_settings_and_versioned_
     status_payload = client.get('/api/status').json()
     assert status_payload['effective_run_settings']['lookback_hours'] == 72
     assert status_payload['effective_run_settings']['max_products'] == 5
-    assert status_payload['latest_run']['app_version'] == '1.6.5'
+    assert status_payload['latest_run']['app_version'] == '1.7.0'
 
     latest = client.get('/api/export/latest').json()
     names = {item['name'] for item in latest['artifacts']}
@@ -422,7 +422,7 @@ def test_rule_backtest_library_and_run(tmp_path: Path):
     latest = client.get('/api/rule-backtests/latest')
     assert latest.status_code == 200
     latest_payload = latest.json()
-    assert latest_payload['version'] == '1.6.5'
+    assert latest_payload['version'] == '1.7.0'
     assert latest_payload['request']['horizon'] == 'h4'
 
 
@@ -565,15 +565,97 @@ def test_live_shadow_cycle_and_latest_manifest(tmp_path: Path):
     })
     assert run_resp.status_code == 200
     payload = run_resp.json()
-    assert payload['version'] == '1.6.5'
+    assert payload['version'] == '1.7.0'
     assert payload['status'] == 'queued'
 
     latest = client.get('/api/live/shadow/latest')
     assert latest.status_code == 200
     latest_payload = latest.json()
-    assert latest_payload['version'] == '1.6.5'
+    assert latest_payload['version'] == '1.7.0'
     assert latest_payload['request']['lookback_hours'] == 72
     assert any(item['name'].startswith('live_validation_pack__') for item in latest_payload['artifacts'])
+
+
+def test_live_shadow_isolates_summary_from_legacy_and_other_scope_rows(tmp_path: Path):
+    import pandas as pd
+    import app.main as app_main
+
+    client = build_client(tmp_path)
+    assert client.post('/api/universe/refresh').status_code == 200
+    assert client.post('/api/mappings/refresh').status_code == 200
+
+    legacy_signal_log = pd.DataFrame([
+        {
+            'signal_id': 'legacy-sig-1',
+            'signal_ts': pd.Timestamp('2026-04-30T12:00:00Z'),
+            'product_id': 'BTC-USD',
+            'rule_instance_id': 'LEGACY_RULE__v1',
+            'merged_rule_id': 'LEGACY_RULE',
+            'rule_name': 'Legacy Rule',
+            'signal_price': 100.0,
+        },
+        {
+            'signal_id': 'other-scope-sig-1',
+            'signal_ts': pd.Timestamp('2026-04-30T13:00:00Z'),
+            'product_id': 'ETH-USD',
+            'rule_instance_id': 'OTHER_SCOPE_RULE__v1',
+            'merged_rule_id': 'OTHER_SCOPE_RULE',
+            'rule_name': 'Other Scope Rule',
+            'signal_price': 200.0,
+            'validation_scope_key': 'selected_rules__1__otherscope',
+            'validation_scope_rule_ids': 'OTHER_SCOPE_RULE',
+        },
+    ])
+    legacy_outcomes = pd.DataFrame([
+        {
+            'signal_id': 'legacy-sig-1',
+            'signal_ts': pd.Timestamp('2026-04-30T12:00:00Z'),
+            'product_id': 'BTC-USD',
+            'rule_instance_id': 'LEGACY_RULE__v1',
+            'merged_rule_id': 'LEGACY_RULE',
+            'rule_name': 'Legacy Rule',
+            'signal_price': 100.0,
+            'future_close_return_h1': 0.01,
+        },
+        {
+            'signal_id': 'other-scope-sig-1',
+            'signal_ts': pd.Timestamp('2026-04-30T13:00:00Z'),
+            'product_id': 'ETH-USD',
+            'rule_instance_id': 'OTHER_SCOPE_RULE__v1',
+            'merged_rule_id': 'OTHER_SCOPE_RULE',
+            'rule_name': 'Other Scope Rule',
+            'signal_price': 200.0,
+            'future_close_return_h1': 0.02,
+            'validation_scope_key': 'selected_rules__1__otherscope',
+            'validation_scope_rule_ids': 'OTHER_SCOPE_RULE',
+        },
+    ])
+    app_main.storage.write_frame(legacy_signal_log, app_main.live_shadow_service.signal_log_name)
+    app_main.storage.write_frame(legacy_outcomes, app_main.live_shadow_service.outcomes_name)
+
+    run_resp = client.post('/api/live/shadow/run', json={
+        'selection_mode': 'selected',
+        'rule_ids': ['MERGED_RULE_001'],
+        'lookback_hours': 72,
+        'max_products': 5,
+        'refresh_references': False,
+        'as_of_time_iso': '2026-05-01T12:00:00Z',
+    })
+    assert run_resp.status_code == 200
+
+    latest_payload = client.get('/api/live/shadow/latest').json()
+    assert latest_payload['version'] == '1.7.0'
+    assert latest_payload['request']['validation_scope_key'].startswith('selected_rules__1__')
+    assert latest_payload['state_scope']['scope_isolated_by_rule_set'] is True
+    assert latest_payload['state_scope']['legacy_signal_rows_ignored'] == 1
+    assert latest_payload['state_scope']['other_scope_signal_rows_ignored'] == 1
+    assert latest_payload['state_scope']['legacy_outcome_rows_ignored'] == 1
+    assert latest_payload['state_scope']['other_scope_outcome_rows_ignored'] == 1
+    assert all(row['merged_rule_id'] != 'LEGACY_RULE' for row in latest_payload['summary_rows'])
+    assert all(row['merged_rule_id'] != 'OTHER_SCOPE_RULE' for row in latest_payload['summary_rows'])
+
+    status_payload = client.get('/api/status').json()
+    assert status_payload['latest_live_shadow']['state_scope']['scope_isolated_by_rule_set'] is True
 
 
 def test_index_contains_live_shadow_tab_and_controls(tmp_path: Path):
@@ -665,18 +747,22 @@ def test_live_rule_eligibility_update_and_scan_manifest(tmp_path: Path):
     assert run_resp.status_code == 200
     payload = run_resp.json()
     assert payload['status'] == 'queued'
-    assert payload['version'] == '1.6.5'
+    assert payload['version'] == '1.7.0'
     queued_run_id = payload['run_id']
 
     latest = client.get('/api/live/scan/latest')
     assert latest.status_code == 200
     latest_payload = latest.json()
-    assert latest_payload['version'] == '1.6.5'
+    assert latest_payload['version'] == '1.7.0'
     assert latest_payload['run_id'] == queued_run_id
     assert latest_payload['request']['lookback_hours'] == 72
     assert latest_payload['summary']['rule_hits'] > 0
     assert latest_payload['summary']['shortlist_rows'] > 0
-    assert any(item['name'].startswith('live_scan_pack__') for item in latest_payload['artifacts'])
+    assert 'near_match_rows' in latest_payload['summary']
+    artifact_names = {item['name'] for item in latest_payload['artifacts']}
+    assert any(name.startswith('live_scan_near_matches__') for name in artifact_names)
+    assert any(name.startswith('rule_coverage_summary__') for name in artifact_names)
+    assert any(name.startswith('live_scan_pack__') for name in artifact_names)
 
 
 def test_index_contains_live_scan_tab_and_controls(tmp_path: Path):
@@ -687,6 +773,8 @@ def test_index_contains_live_scan_tab_and_controls(tmp_path: Path):
     assert 'data-tab-target="scan"' in html
     assert 'Scan selected live-eligible rules' in html
     assert '/api/live/scan/run' in html
+    assert 'Closest current candidates' in html
+    assert 'Coverage health' in html
 
 
 def test_live_scan_uses_live_scan_defaults_and_matching_path(tmp_path: Path):
@@ -712,6 +800,8 @@ def test_live_scan_uses_live_scan_defaults_and_matching_path(tmp_path: Path):
     assert latest['request']['lookback_hours'] == 24
     assert latest['summary']['rule_hits'] > 0
     assert latest['summary']['shortlist_rows'] > 0
+    assert 'near_match_preview' in latest
+    assert 'coverage_preview' in latest
 
 
 def test_live_scan_select_per_product_latest_includes_staggered_products():
@@ -780,7 +870,7 @@ def test_downloadable_health_and_status_snapshots(tmp_path: Path):
     assert status.status_code == 200
     assert 'attachment; filename="status__' in status.headers.get('content-disposition', '')
     payload = status.json()
-    assert payload['latest_run']['app_version'] == '1.6.5'
+    assert payload['latest_run']['app_version'] == '1.7.0'
     assert payload['effective_run_settings']['lookback_hours'] == 72
 
 
@@ -806,7 +896,7 @@ def test_operator_snapshot_zip_contains_health_status_and_latest_manifests(tmp_p
         assert 'latest_live_shadow_manifest.json' in names
         assert 'latest_live_scan_manifest.json' in names
         status_payload = json.loads(zf.read('status.json').decode('utf-8'))
-        assert status_payload['latest_run']['app_version'] == '1.6.5'
+        assert status_payload['latest_run']['app_version'] == '1.7.0'
 
 
 def test_status_normalizes_current_app_version_and_marks_stale_failures(tmp_path: Path):
@@ -835,7 +925,7 @@ def test_status_normalizes_current_app_version_and_marks_stale_failures(tmp_path
     })
 
     payload = client.get('/api/status').json()
-    assert payload['status']['version'] == '1.6.5'
+    assert payload['status']['version'] == '1.7.0'
     step = payload['status']['steps']['live_shadow_cycle']
     assert step['stale_failure'] is True
     assert step['latest_manifest_version'] == '1.6.1'

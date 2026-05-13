@@ -1,11 +1,18 @@
 # Test Results
 
-Version: 1.6.5
+Version: 1.7.0
 
-Result: 41 passed
+Validation performed in this build:
 
-Focus of this tranche:
-- status truthfulness on deployed-version boundaries
-- stale-failure classification for older saved manifests
-- warnings-panel clarity for failures produced on older app versions
-- operator snapshot/status coherence with current deployed version
+- Live-scan near-match diagnostics added and covered by regression assertions.
+- Rule coverage summary artifacts added and covered by regression assertions.
+- Scan UI updated with Closest current candidates and Coverage health sections.
+- Existing regression suite was run in split groups to avoid long single-command timeout in the execution environment.
+
+Results:
+
+- 21 passed, 21 deselected
+- 19 passed, 23 deselected
+- 4 passed
+
+Combined: all 42 collected tests passed across split runs.

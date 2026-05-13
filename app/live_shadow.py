@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import traceback
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -51,6 +52,75 @@ class LiveShadowService:
                 parsed = parsed.replace(tzinfo=timezone.utc)
             return parsed.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
         return datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+
+
+    @staticmethod
+    def _resolved_rule_ids(rules: list[dict[str, Any]]) -> list[str]:
+        return sorted({str(rule.get("merged_rule_id")) for rule in rules if rule.get("merged_rule_id")})
+
+    @classmethod
+    def _validation_scope_key(cls, rules: list[dict[str, Any]]) -> str:
+        resolved_rule_ids = cls._resolved_rule_ids(rules)
+        basis = "|".join(resolved_rule_ids)
+        digest = hashlib.sha1(basis.encode("utf-8")).hexdigest()[:12] if basis else "empty"
+        return f"selected_rules__{len(resolved_rule_ids)}__{digest}"
+
+    def _apply_scope_metadata(self, frame: pd.DataFrame, scope_key: str, resolved_rule_ids: list[str]) -> pd.DataFrame:
+        if frame.empty:
+            out = frame.copy()
+            out["validation_scope_key"] = pd.Series(dtype="string")
+            out["validation_scope_rule_ids"] = pd.Series(dtype="string")
+            return out
+        out = frame.copy()
+        out["validation_scope_key"] = scope_key
+        out["validation_scope_rule_ids"] = "|".join(resolved_rule_ids)
+        return out
+
+    def _filter_scope_rows(self, frame: pd.DataFrame, scope_key: str) -> tuple[pd.DataFrame, dict[str, int]]:
+        meta = {
+            "matched_rows": 0,
+            "legacy_rows_ignored": 0,
+            "other_scope_rows_ignored": 0,
+        }
+        if frame.empty:
+            return frame.copy(), meta
+        if "validation_scope_key" not in frame.columns:
+            meta["legacy_rows_ignored"] = int(len(frame))
+            return frame.iloc[0:0].copy(), meta
+        scoped = frame.copy()
+        scope_series = scoped["validation_scope_key"].astype("string")
+        matched = scope_series.eq(scope_key).fillna(False)
+        legacy = scope_series.isna() | scope_series.eq("")
+        meta["matched_rows"] = int(matched.sum())
+        meta["legacy_rows_ignored"] = int(legacy.sum())
+        meta["other_scope_rows_ignored"] = int((~matched & ~legacy).sum())
+        return scoped.loc[matched].copy(), meta
+
+    def _merge_scoped_rows(self, existing_all: pd.DataFrame, scoped_rows: pd.DataFrame, scope_key: str) -> pd.DataFrame:
+        if existing_all.empty:
+            return scoped_rows.copy()
+        if "validation_scope_key" not in existing_all.columns:
+            outside_scope = existing_all.copy()
+        else:
+            scope_series = existing_all["validation_scope_key"].astype("string")
+            outside_scope = existing_all.loc[~scope_series.eq(scope_key).fillna(False)].copy()
+        if outside_scope.empty:
+            combined = scoped_rows.copy()
+        elif scoped_rows.empty:
+            combined = outside_scope.copy()
+        else:
+            combined = pd.concat([outside_scope, scoped_rows], ignore_index=True)
+        if combined.empty:
+            return combined
+        dedupe_subset = [col for col in ["validation_scope_key", "signal_id"] if col in combined.columns]
+        if dedupe_subset:
+            combined = combined.drop_duplicates(subset=dedupe_subset, keep="last")
+        if "signal_ts" in combined.columns:
+            combined["signal_ts"] = pd.to_datetime(combined["signal_ts"], utc=True, errors="coerce")
+        sort_cols = [col for col in ["signal_ts", "product_id", "rule_instance_id"] if col in combined.columns]
+        if sort_cols:
+            combined = combined.sort_values(sort_cols, na_position="last").reset_index(drop=True)
+        return combined
 
 
 
@@ -451,6 +521,8 @@ class LiveShadowService:
         self.storage.update_status(step, "running", message="Running live shadow validation cycle", run_id=run_id, phase="initializing")
         try:
             rules = self._select_rules(request)
+            resolved_rule_ids = self._resolved_rule_ids(rules)
+            scope_key = self._validation_scope_key(rules)
             products, mapping = self._ensure_reference_tables(request.refresh_references if request.refresh_references is not None else self.settings.live_shadow_auto_refresh_references)
             start = as_of - timedelta(hours=lookback_hours)
             end = as_of
@@ -463,10 +535,16 @@ class LiveShadowService:
             snapshot = feature_df.loc[pd.to_datetime(feature_df["ts"], utc=True) == latest_ts].copy()
             self.storage.update_status(step, "running", message="Evaluating live rules", phase="evaluating_rules", latest_signal_ts=latest_ts.isoformat(), snapshot_rows=int(len(snapshot)))
             new_signals, skipped = self._evaluate_snapshot(snapshot, rules, run_id=run_id, decision_time=as_of)
-            signal_log = self._append_signals(self._existing_signal_log(), new_signals)
-            outcomes, resolved_updates = self._resolve_outcomes(signal_log, self._existing_outcomes(), cb=cb, latest_available_ts=pd.Timestamp(latest_ts), resolved_at=as_of)
-            self.storage.write_frame(signal_log, self.signal_log_name)
-            self.storage.write_frame(outcomes, self.outcomes_name)
+            all_signal_rows = self._existing_signal_log()
+            scoped_signal_rows, signal_scope_meta = self._filter_scope_rows(all_signal_rows, scope_key)
+            all_outcome_rows = self._existing_outcomes()
+            scoped_outcome_rows, outcome_scope_meta = self._filter_scope_rows(all_outcome_rows, scope_key)
+            new_signals = self._apply_scope_metadata(new_signals, scope_key, resolved_rule_ids)
+            signal_log = self._append_signals(scoped_signal_rows, new_signals)
+            outcomes, resolved_updates = self._resolve_outcomes(signal_log, scoped_outcome_rows, cb=cb, latest_available_ts=pd.Timestamp(latest_ts), resolved_at=as_of)
+            outcomes = self._apply_scope_metadata(outcomes, scope_key, resolved_rule_ids)
+            self.storage.write_frame(self._merge_scoped_rows(all_signal_rows, signal_log, scope_key), self.signal_log_name)
+            self.storage.write_frame(self._merge_scoped_rows(all_outcome_rows, outcomes, scope_key), self.outcomes_name)
             summary_df = self._build_summary(signal_log, outcomes)
 
             signal_path = self.storage.write_csv(signal_log, f"live_signal_log__{run_id}", compress=False)
@@ -491,6 +569,8 @@ class LiveShadowService:
                     "max_products": max_products,
                     "selection_mode": request.selection_mode,
                     "rule_ids": request.rule_ids,
+                    "resolved_rule_ids": resolved_rule_ids,
+                    "validation_scope_key": scope_key,
                     "refresh_references": bool(request.refresh_references),
                     "as_of_time_iso": as_of.isoformat(),
                 },
@@ -507,6 +587,17 @@ class LiveShadowService:
                     "coinbase_rows": int(len(cb)),
                     "coinapi_rows": int(len(ca)),
                 },
+                "state_scope": {
+                    "validation_scope_key": scope_key,
+                    "resolved_rule_ids": resolved_rule_ids,
+                    "existing_scope_signals_before_cycle": int(signal_scope_meta["matched_rows"]),
+                    "existing_scope_outcomes_before_cycle": int(outcome_scope_meta["matched_rows"]),
+                    "legacy_signal_rows_ignored": int(signal_scope_meta["legacy_rows_ignored"]),
+                    "other_scope_signal_rows_ignored": int(signal_scope_meta["other_scope_rows_ignored"]),
+                    "legacy_outcome_rows_ignored": int(outcome_scope_meta["legacy_rows_ignored"]),
+                    "other_scope_outcome_rows_ignored": int(outcome_scope_meta["other_scope_rows_ignored"]),
+                    "scope_isolated_by_rule_set": True,
+                },
                 "summary_rows": summary_df.head(50).to_dict(orient="records"),
             }
             manifest_path = self.storage.export_path(f"live_validation_manifest__{run_id}", ".json")
@@ -518,7 +609,7 @@ class LiveShadowService:
             artifacts = [self.storage.file_info(path) for path in [signal_path, outcome_path, summary_path, pending_path, manifest_path, pack_path]]
             manifest["artifacts"] = artifacts
             self.storage.write_latest_live_shadow_manifest(manifest)
-            self.storage.update_status(step, "completed", message="Live shadow validation cycle completed", run_id=run_id, latest_signal_ts=latest_ts.isoformat(), signals_created_this_cycle=int(len(new_signals)), pending_signals=int(len(pending)), resolved_updates_this_cycle=int(resolved_updates), rules_evaluated=int(len(rules)), pack_artifact=pack_path.name)
+            self.storage.update_status(step, "completed", message="Live shadow validation cycle completed", run_id=run_id, latest_signal_ts=latest_ts.isoformat(), signals_created_this_cycle=int(len(new_signals)), pending_signals=int(len(pending)), resolved_updates_this_cycle=int(resolved_updates), rules_evaluated=int(len(rules)), pack_artifact=pack_path.name, validation_scope_key=scope_key)
             return manifest
         except Exception as exc:
             self.storage.update_status(step, "failed", error=str(exc), traceback=traceback.format_exc())

@@ -175,6 +175,182 @@ class LiveScannerService:
             shortlist.insert(0, "scanner_rank", np.arange(1, len(shortlist) + 1))
         return shortlist, rule_hits.sort_values(["product_id", "priority", "merged_rule_id"]).reset_index(drop=True)
 
+
+    def _condition_diagnostics(self, prepared: pd.DataFrame, conditions: list[dict[str, Any]]) -> tuple[pd.DataFrame, list[dict[str, Any]], list[str]]:
+        diag = pd.DataFrame(index=prepared.index)
+        resolved_conditions: list[dict[str, Any]] = []
+        missing: list[str] = []
+        if not conditions:
+            diag["__passes__"] = True
+            return diag, resolved_conditions, missing
+        pass_cols: list[str] = []
+        distance_cols: list[str] = []
+        failure_cols: list[str] = []
+        for idx, condition in enumerate(conditions, start=1):
+            cond_mask, metadata = self.rule_service._condition_mask(prepared, condition)
+            resolved_conditions.append(metadata)
+            label = str(metadata.get("resolved_field") or metadata.get("field") or f"condition_{idx}")
+            pass_col = f"pass_{idx}"
+            dist_col = f"distance_{idx}"
+            fail_col = f"failure_{idx}"
+            if cond_mask is None:
+                missing.append(str(condition.get("field")))
+                diag[pass_col] = False
+                diag[dist_col] = np.inf
+                diag[fail_col] = f"missing:{label}"
+            else:
+                passed = cond_mask.fillna(False).astype(bool)
+                diag[pass_col] = passed
+                distance = self._condition_distance(prepared, metadata)
+                diag[dist_col] = distance.where(~passed, 0.0)
+                diag[fail_col] = np.where(passed, "", self._failure_label(prepared, metadata))
+            pass_cols.append(pass_col)
+            distance_cols.append(dist_col)
+            failure_cols.append(fail_col)
+        diag["condition_count"] = len(pass_cols)
+        diag["passed_conditions"] = diag[pass_cols].sum(axis=1) if pass_cols else 0
+        diag["condition_pass_ratio"] = diag["passed_conditions"] / max(len(pass_cols), 1)
+        diag["distance_to_trigger"] = diag[distance_cols].replace([np.inf, -np.inf], np.nan).sum(axis=1, min_count=1).fillna(999999.0) if distance_cols else 0.0
+        diag["failed_conditions"] = diag[failure_cols].apply(lambda row: " | ".join([str(x) for x in row.tolist() if str(x)]), axis=1) if failure_cols else ""
+        diag["__passes__"] = diag["passed_conditions"].eq(len(pass_cols)) if pass_cols else True
+        return diag, resolved_conditions, missing
+
+    def _condition_distance(self, df: pd.DataFrame, metadata: dict[str, Any]) -> pd.Series:
+        field = metadata.get("resolved_field")
+        if field not in df.columns:
+            return pd.Series(np.inf, index=df.index)
+        series = pd.to_numeric(df[field], errors="coerce")
+        logic = metadata.get("logic")
+        if logic == "between":
+            lower = metadata.get("lower_bound")
+            upper = metadata.get("upper_bound")
+            lower_gap = pd.to_numeric(pd.Series(lower, index=df.index), errors="coerce") - series
+            upper_gap = series - pd.to_numeric(pd.Series(upper, index=df.index), errors="coerce")
+            raw_gap = pd.concat([lower_gap, upper_gap], axis=1).max(axis=1).clip(lower=0)
+            scale = max(abs(float(lower or 0)), abs(float(upper or 0)), 1.0)
+            return (raw_gap / scale).fillna(999999.0)
+        threshold = metadata.get("threshold", metadata.get("value"))
+        try:
+            threshold_f = float(threshold)
+        except Exception:
+            return pd.Series(999999.0, index=df.index)
+        if logic in {">", ">="}:
+            raw_gap = (threshold_f - series).clip(lower=0)
+        elif logic in {"<", "<="}:
+            raw_gap = (series - threshold_f).clip(lower=0)
+        elif logic == "==":
+            raw_gap = (series - threshold_f).abs()
+        elif logic == "!=":
+            raw_gap = pd.Series(0.0, index=df.index)
+        else:
+            raw_gap = pd.Series(999999.0, index=df.index)
+        scale = max(abs(threshold_f), 1.0)
+        return (raw_gap / scale).fillna(999999.0)
+
+    def _failure_label(self, df: pd.DataFrame, metadata: dict[str, Any]) -> pd.Series:
+        field = metadata.get("resolved_field") or metadata.get("field")
+        if field not in df.columns:
+            return pd.Series(f"missing:{field}", index=df.index)
+        actual = df[field]
+        logic = metadata.get("logic")
+        if logic == "between":
+            target = f"between {metadata.get('lower_bound')} and {metadata.get('upper_bound')}"
+        else:
+            target_value = metadata.get("threshold", metadata.get("value"))
+            target = f"{logic} {target_value}"
+        return actual.map(lambda v: f"{field} needed {target}, current {v}")
+
+    def _build_near_match_tables(self, snapshot: pd.DataFrame, rules: list[dict[str, Any]], latest_ts: pd.Timestamp, rule_hits: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+        prepared = self.rule_service._prepare_frame(snapshot)
+        rows: list[dict[str, Any]] = []
+        coverage: list[dict[str, Any]] = []
+        signal_log = self.live_shadow._existing_signal_log()
+        signal_log = signal_log.copy() if isinstance(signal_log, pd.DataFrame) else pd.DataFrame()
+        if not signal_log.empty and "signal_ts" in signal_log.columns:
+            signal_log["signal_ts"] = pd.to_datetime(signal_log["signal_ts"], utc=True, errors="coerce")
+        current_hits_by_rule = rule_hits["merged_rule_id"].astype(str).value_counts().to_dict() if not rule_hits.empty and "merged_rule_id" in rule_hits.columns else {}
+        for rule in rules:
+            rule_near_count = 0
+            for instance in self.rule_service._resolve_rule_variants(rule):
+                conditions = instance.get("conditions", [])
+                diag, resolved_conditions, missing = self._condition_diagnostics(prepared, conditions)
+                if missing:
+                    coverage.append({
+                        "merged_rule_id": instance["merged_rule_id"],
+                        "rule_instance_id": instance["instance_id"],
+                        "rule_name": instance.get("name"),
+                        "current_full_matches": 0,
+                        "near_match_rows": 0,
+                        "best_condition_pass_ratio": None,
+                        "best_distance_to_trigger": None,
+                        "missing_features": "|".join(sorted(set(missing))),
+                    })
+                    continue
+                candidate = prepared.join(diag)
+                full_matches = int(candidate["__passes__"].sum()) if "__passes__" in candidate.columns else 0
+                near = candidate.loc[~candidate["__passes__"].fillna(False)].copy()
+                near_count_for_instance = 0
+                if not near.empty:
+                    near["priority"] = instance.get("priority") if instance.get("priority") is not None else 999
+                    near["candidate_score"] = (near["condition_pass_ratio"].astype(float) * 1000.0) - (near["distance_to_trigger"].astype(float).clip(upper=999999) * 25.0) + (100.0 - pd.to_numeric(near["priority"], errors="coerce").fillna(999).clip(lower=0, upper=999))
+                    near = near.sort_values(["condition_pass_ratio", "distance_to_trigger", "candidate_score", "product_id"], ascending=[False, True, False, True]).head(10)
+                    near_count_for_instance = int(len(near))
+                    rule_near_count += near_count_for_instance
+                    for _, row in near.iterrows():
+                        rows.append({
+                            "scan_ts": pd.Timestamp(latest_ts).isoformat(),
+                            "product_id": row.get("product_id"),
+                            "base_asset": row.get("base_asset"),
+                            "quote_asset": row.get("quote_asset"),
+                            "merged_rule_id": instance["merged_rule_id"],
+                            "rule_instance_id": instance["instance_id"],
+                            "rule_name": instance.get("name"),
+                            "priority": instance.get("priority"),
+                            "condition_count": int(row.get("condition_count", 0) or 0),
+                            "passed_conditions": int(row.get("passed_conditions", 0) or 0),
+                            "condition_pass_ratio": float(row.get("condition_pass_ratio", 0.0) or 0.0),
+                            "distance_to_trigger": float(row.get("distance_to_trigger", 999999.0) or 999999.0),
+                            "candidate_score": float(row.get("candidate_score", 0.0) or 0.0),
+                            "failed_conditions": row.get("failed_conditions", ""),
+                            "cb_close": self._safe_float(row.get("cb_close")),
+                            "cb_ret_1": self._safe_float(row.get("cb_ret_1")),
+                            "cb_ret_6": self._safe_float(row.get("cb_ret_6")),
+                            "cb_ret_24": self._safe_float(row.get("cb_ret_24")),
+                            "ca_ret_1": self._safe_float(row.get("ca_ret_1")),
+                            "cs_coinbase_vs_coinapi_return_diff": self._safe_float(row.get("cs_coinbase_vs_coinapi_return_diff")),
+                        })
+                coverage.append({
+                    "merged_rule_id": instance["merged_rule_id"],
+                    "rule_instance_id": instance["instance_id"],
+                    "rule_name": instance.get("name"),
+                    "current_full_matches": int(full_matches),
+                    "near_match_rows": near_count_for_instance,
+                    "best_condition_pass_ratio": float(candidate["condition_pass_ratio"].max()) if not candidate.empty and "condition_pass_ratio" in candidate.columns else None,
+                    "best_distance_to_trigger": float(candidate["distance_to_trigger"].min()) if not candidate.empty and "distance_to_trigger" in candidate.columns else None,
+                    "missing_features": "",
+                })
+        near_df = pd.DataFrame(rows)
+        if not near_df.empty:
+            near_df = near_df.sort_values(["candidate_score", "condition_pass_ratio", "distance_to_trigger"], ascending=[False, False, True]).reset_index(drop=True)
+            near_df.insert(0, "near_match_rank", np.arange(1, len(near_df) + 1))
+        else:
+            near_df = pd.DataFrame(columns=["near_match_rank", "scan_ts", "product_id", "merged_rule_id", "rule_instance_id", "condition_pass_ratio", "distance_to_trigger", "candidate_score", "failed_conditions"])
+        coverage_df = pd.DataFrame(coverage)
+        if not coverage_df.empty:
+            if not signal_log.empty and "merged_rule_id" in signal_log.columns:
+                since = pd.Timestamp(latest_ts) - pd.Timedelta(days=7)
+                recent = signal_log.loc[pd.to_datetime(signal_log.get("signal_ts"), utc=True, errors="coerce") >= since].copy()
+                seven = recent["merged_rule_id"].astype(str).value_counts().to_dict() if not recent.empty else {}
+                last = signal_log.dropna(subset=["signal_ts"]).sort_values("signal_ts").groupby("merged_rule_id")["signal_ts"].last().astype(str).to_dict()
+            else:
+                seven, last = {}, {}
+            coverage_df["current_rule_hits"] = coverage_df["merged_rule_id"].astype(str).map(lambda x: int(current_hits_by_rule.get(x, 0)))
+            coverage_df["live_hit_count_7d"] = coverage_df["merged_rule_id"].astype(str).map(lambda x: int(seven.get(x, 0)))
+            coverage_df["estimated_hourly_hit_rate_7d"] = coverage_df["live_hit_count_7d"] / 168.0
+            coverage_df["last_live_signal_ts"] = coverage_df["merged_rule_id"].astype(str).map(lambda x: last.get(x))
+            coverage_df = coverage_df.sort_values(["current_full_matches", "best_condition_pass_ratio", "best_distance_to_trigger", "merged_rule_id"], ascending=[False, False, True, True]).reset_index(drop=True)
+        return near_df, coverage_df
+
     def run_cycle(self, request: LiveScanRequest, run_id_override: str | None = None) -> dict[str, Any]:
         step = "live_scan_cycle"
         run_id = run_id_override or self.storage.make_run_id()
@@ -199,9 +375,12 @@ class LiveScannerService:
             self.storage.update_status(step, "running", message="Evaluating live-eligible rules", phase="evaluating_rules", latest_signal_ts=latest_ts.isoformat(), snapshot_rows=int(len(snapshot)), stale_products=stale_products)
             signal_rows, skipped = self.live_shadow._evaluate_snapshot(snapshot, rules, run_id=run_id, decision_time=as_of)
             shortlist, rule_hits = self._build_scan_tables(signal_rows, latest_ts)
+            near_matches, coverage_summary = self._build_near_match_tables(snapshot, rules, latest_ts, rule_hits)
 
             shortlist_path = self.storage.write_csv(shortlist, f"live_scan_results__{run_id}", compress=False)
             hits_path = self.storage.write_csv(rule_hits, f"live_scan_rule_hits__{run_id}", compress=False)
+            near_path = self.storage.write_csv(near_matches, f"live_scan_near_matches__{run_id}", compress=False)
+            coverage_path = self.storage.write_csv(coverage_summary, f"rule_coverage_summary__{run_id}", compress=False)
             summary_df = shortlist[["scanner_rank", "product_id", "matched_rule_count", "matched_rule_ids", "best_priority", "ranking_score", "matched_primary_horizons", "data_quality_note"]].copy() if not shortlist.empty else pd.DataFrame(columns=["scanner_rank", "product_id", "matched_rule_count", "matched_rule_ids", "best_priority", "ranking_score", "matched_primary_horizons", "data_quality_note"])
             summary_path = self.storage.write_csv(summary_df, f"live_scan_summary__{run_id}", compress=False)
             manifest = {
@@ -230,20 +409,27 @@ class LiveScannerService:
                     "stale_product_count": int(len(stale_products)),
                     "top_match_product_id": shortlist.iloc[0]["product_id"] if not shortlist.empty else None,
                     "top_match_rule_count": int(shortlist.iloc[0]["matched_rule_count"]) if not shortlist.empty else 0,
+                    "near_match_rows": int(len(near_matches)),
+                    "coverage_rule_rows": int(len(coverage_summary)),
+                    "best_near_match_product_id": near_matches.iloc[0]["product_id"] if not near_matches.empty else None,
+                    "best_near_match_rule_id": near_matches.iloc[0]["merged_rule_id"] if not near_matches.empty else None,
+                    "best_condition_pass_ratio": float(near_matches.iloc[0]["condition_pass_ratio"]) if not near_matches.empty else None,
                     "skipped_rules": skipped,
                 },
                 "preview": shortlist.head(50).to_dict(orient="records"),
+                "near_match_preview": near_matches.head(50).to_dict(orient="records"),
+                "coverage_preview": coverage_summary.head(50).to_dict(orient="records"),
             }
             manifest_path = self.storage.export_path(f"live_scan_manifest__{run_id}", ".json")
             self.storage.write_json(manifest, manifest_path)
             pack_path = self.storage.export_path(f"live_scan_pack__{run_id}", ".zip")
             with zipfile.ZipFile(pack_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-                for path in [shortlist_path, hits_path, summary_path, manifest_path]:
+                for path in [shortlist_path, hits_path, near_path, coverage_path, summary_path, manifest_path]:
                     zf.write(path, arcname=Path(path).name)
-            artifacts = [self.storage.file_info(path) for path in [shortlist_path, hits_path, summary_path, manifest_path, pack_path]]
+            artifacts = [self.storage.file_info(path) for path in [shortlist_path, hits_path, near_path, coverage_path, summary_path, manifest_path, pack_path]]
             manifest["artifacts"] = artifacts
             self.storage.write_latest_live_scan_manifest(manifest)
-            self.storage.update_status(step, "completed", message="Live scanner completed", run_id=run_id, latest_signal_ts=latest_ts.isoformat(), shortlist_rows=int(len(shortlist)), rule_hits=int(len(rule_hits)), rules_evaluated=int(len(rules)), pack_artifact=pack_path.name)
+            self.storage.update_status(step, "completed", message="Live scanner completed", run_id=run_id, latest_signal_ts=latest_ts.isoformat(), shortlist_rows=int(len(shortlist)), rule_hits=int(len(rule_hits)), near_match_rows=int(len(near_matches)), rules_evaluated=int(len(rules)), pack_artifact=pack_path.name)
             return manifest
         except Exception as exc:
             self.storage.update_status(step, "failed", error=str(exc), traceback=traceback.format_exc())

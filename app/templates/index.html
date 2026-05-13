@@ -1219,7 +1219,7 @@
             <div class="card-header">
               <div>
                 <h2>Live scanner</h2>
-                <p class="section-copy">Run a live market scan on the latest completed hourly snapshot. The scanner evaluates only live-eligible direct rules and returns a ranked shortlist of matching coins.</p>
+                <p class="section-copy">Run a live market scan on the latest completed hourly snapshot. The scanner evaluates only live-eligible direct rules and returns a ranked shortlist plus near-match diagnostics.</p>
               </div>
               <span class="pill soft">Latest snapshot only</span>
             </div>
@@ -1307,6 +1307,62 @@
               </div>
             </div>
             <div class="download-list" id="liveScanArtifacts" style="margin-top: 12px;"></div>
+          </div>
+        </div>
+
+        <div class="panel-grid">
+          <div class="card span-7">
+            <div class="card-header">
+              <div>
+                <h2>Closest current candidates</h2>
+                <p class="section-copy">Coins that did not fully match a live rule but are nearest to triggering. Use this to distinguish a genuinely quiet market from rules that are almost firing.</p>
+              </div>
+              <span class="pill soft">Near matches</span>
+            </div>
+            <div class="table-shell">
+              <div class="scroll-x">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Rank</th>
+                      <th>Coin</th>
+                      <th>Rule</th>
+                      <th>Pass ratio</th>
+                      <th>Distance</th>
+                      <th>Score</th>
+                      <th>Failed conditions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="liveScanNearMatchTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="card span-5">
+            <div class="card-header">
+              <div>
+                <h2>Coverage health</h2>
+                <p class="section-copy">Per-rule current coverage, nearest-trigger strength, and recent live-hit frequency.</p>
+              </div>
+              <span class="pill soft">Rule telemetry</span>
+            </div>
+            <div class="table-shell">
+              <div class="scroll-x">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Rule</th>
+                      <th>Matches</th>
+                      <th>Near</th>
+                      <th>Best ratio</th>
+                      <th>7d hits</th>
+                    </tr>
+                  </thead>
+                  <tbody id="liveScanCoverageTableBody"></tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -2226,6 +2282,7 @@
         {label: 'Latest scan run', value: scan.run_id || '—'},
         {label: 'Shortlist rows', value: fmtNum(summary.shortlist_rows)},
         {label: 'Rule hits', value: fmtNum(summary.rule_hits)},
+        {label: 'Near matches', value: fmtNum(summary.near_match_rows)},
         {label: 'Rules evaluated', value: fmtNum(summary.rules_evaluated)},
       ];
       setHtml('liveScanMetrics', metrics.map(item => `<div class="metric"><div class="label">${htmlEscape(item.label)}</div><div class="value">${htmlEscape(item.value)}</div></div>`).join(''));
@@ -2259,8 +2316,32 @@
         </tr>
       `).join('');
       setHtml('liveScanTableBody', body || '<tr><td colspan="11">No live scan matches yet.</td></tr>');
+      const nearRows = scan.near_match_preview || [];
+      const nearBody = nearRows.map(row => `
+        <tr>
+          <td>${htmlEscape(fmtNum(row.near_match_rank))}</td>
+          <td>${htmlEscape(row.product_id || '')}</td>
+          <td>${htmlEscape(row.merged_rule_id || '')}</td>
+          <td>${row.condition_pass_ratio == null ? '—' : Number(row.condition_pass_ratio).toFixed(2)}</td>
+          <td>${row.distance_to_trigger == null ? '—' : Number(row.distance_to_trigger).toFixed(4)}</td>
+          <td>${row.candidate_score == null ? '—' : Number(row.candidate_score).toFixed(1)}</td>
+          <td>${htmlEscape(row.failed_conditions || '')}</td>
+        </tr>
+      `).join('');
+      setHtml('liveScanNearMatchTableBody', nearBody || '<tr><td colspan="7">No near-match diagnostics available yet. Run a fresh scan on v1.7.0.</td></tr>');
+      const coverageRows = scan.coverage_preview || [];
+      const coverageBody = coverageRows.map(row => `
+        <tr>
+          <td>${htmlEscape(row.merged_rule_id || '')}</td>
+          <td>${htmlEscape(fmtNum(row.current_full_matches))}</td>
+          <td>${htmlEscape(fmtNum(row.near_match_rows))}</td>
+          <td>${row.best_condition_pass_ratio == null ? '—' : Number(row.best_condition_pass_ratio).toFixed(2)}</td>
+          <td>${htmlEscape(fmtNum(row.live_hit_count_7d))}</td>
+        </tr>
+      `).join('');
+      setHtml('liveScanCoverageTableBody', coverageBody || '<tr><td colspan="5">No coverage telemetry available yet. Run a fresh scan on v1.7.0.</td></tr>');
       const selectedLiveEligible = getSelectedRuleIds().filter(id => { const rule = ruleLibrary.find(item => ruleIdentity(item) === id); return rule?.rule_kind === 'direct_rule' && rule?.live_eligible; }).length;
-      setText('liveScanConfigSummary', selectedLiveEligible ? `${selectedLiveEligible} selected live-eligible direct rules are ready to scan. The scanner evaluates the latest completed hourly snapshot and returns a ranked shortlist of matching coins.` : 'Mark one or more direct rules as live eligible on the Rules tab, or run all live-eligible direct rules. The scanner excludes non-direct and non-live-eligible rules by default.');
+      setText('liveScanConfigSummary', selectedLiveEligible ? `${selectedLiveEligible} selected live-eligible direct rules are ready to scan. The scanner evaluates the latest completed hourly snapshot and returns a ranked shortlist plus near-match diagnostics.` : 'Mark one or more direct rules as live eligible on the Rules tab, or run all live-eligible direct rules. The scanner excludes non-direct and non-live-eligible rules by default.');
     }
 
     async function fetchLiveScanManifest(preserveTab = false) {
@@ -2311,6 +2392,7 @@
       const live = data.latest_live_shadow || {};
       const summary = live.summary || {};
       const request = live.request || {};
+      const stateScope = live.state_scope || {};
       const liveStep = data.status?.steps?.live_shadow_cycle || {};
       const metrics = [
         {label: 'Latest live run', value: live.run_id || '—'},
@@ -2324,6 +2406,7 @@
         <span class="pill neutral">Latest signal bar: ${htmlEscape(summary.latest_signal_ts || '—')}</span>
         <span class="pill neutral">Lookback: ${htmlEscape(fmtNum(request.lookback_hours))}h</span>
         <span class="pill neutral">Universe: ${htmlEscape(fmtNum(request.max_products))} products</span>
+        <span class="pill neutral">Scope rules: ${htmlEscape(fmtNum((request.resolved_rule_ids || request.rule_ids || []).length))}</span>
       `);
       const progress = progressPercent(liveStep.progress);
       el('liveProgressBar').style.width = `${progress}%`;
@@ -2347,7 +2430,11 @@
       `).join('');
       setHtml('liveSummaryTableBody', body || '<tr><td colspan="8">No live summary rows yet.</td></tr>');
       const selectedCount = getSelectedRuleIds().length;
-      setText('liveConfigSummary', selectedCount ? `${selectedCount} selected rules ready for live shadow validation. The service will evaluate direct rules only, freeze the latest completed hourly snapshot, and resolve H1/H4/H24 outcomes on later cycles.` : 'Select one or more direct rules on the Rules tab or run all direct rules. The cycle refreshes live bars, evaluates the latest completed hourly snapshot, and resolves matured outcomes from earlier signals.');
+      if (stateScope.scope_isolated_by_rule_set) {
+        setText('liveConfigSummary', `${selectedCount ? `${selectedCount} selected rules ready for live shadow validation.` : 'Live shadow validation is ready.'} Evidence is isolated by resolved rule set so older signals from different live selections do not contaminate the current summary.`);
+      } else {
+        setText('liveConfigSummary', selectedCount ? `${selectedCount} selected rules ready for live shadow validation. The service will evaluate direct rules only, freeze the latest completed hourly snapshot, and resolve H1/H4/H24 outcomes on later cycles.` : 'Select one or more direct rules on the Rules tab or run all direct rules. The cycle refreshes live bars, evaluates the latest completed hourly snapshot, and resolves matured outcomes from earlier signals.');
+      }
     }
 
     async function fetchLiveManifest(preserveTab = false) {

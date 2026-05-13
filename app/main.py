@@ -151,6 +151,7 @@ def _status_payload() -> dict:
             "app_version": latest_live_shadow.get("version"),
             "request": latest_live_shadow.get("request", {}),
             "summary": latest_live_shadow.get("summary", {}),
+            "state_scope": latest_live_shadow.get("state_scope", {}),
             "artifacts": latest_live_shadow.get("artifacts", []),
             "summary_rows": latest_live_shadow.get("summary_rows", []),
             "is_current_version": latest_live_shadow.get("version") == settings.app_version if latest_live_shadow else False,
@@ -163,6 +164,8 @@ def _status_payload() -> dict:
             "summary": latest_live_scan.get("summary", {}),
             "artifacts": latest_live_scan.get("artifacts", []),
             "preview": latest_live_scan.get("preview", []),
+            "near_match_preview": latest_live_scan.get("near_match_preview", []),
+            "coverage_preview": latest_live_scan.get("coverage_preview", []),
             "is_current_version": latest_live_scan.get("version") == settings.app_version if latest_live_scan else False,
         },
     }
