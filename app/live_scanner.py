@@ -17,6 +17,10 @@ from .settings import Settings
 from .storage import StorageManager
 
 
+MAX_ADAPTIVE_REPLAY_VARIANTS = 60
+RELAXATION_MIN_PASS_RATIO = 0.5
+
+
 def _select_per_product_latest(feature_df: pd.DataFrame, freshness_hours: int = 2) -> tuple[pd.DataFrame, list[str], pd.Timestamp | None]:
     if feature_df.empty:
         return feature_df.copy(), [], None
@@ -351,6 +355,434 @@ class LiveScannerService:
             coverage_df = coverage_df.sort_values(["current_full_matches", "best_condition_pass_ratio", "best_distance_to_trigger", "merged_rule_id"], ascending=[False, False, True, True]).reset_index(drop=True)
         return near_df, coverage_df
 
+    def _empty_adaptive_replay_tables(self, status: str = "no_adaptive_replay") -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        replay_cols = [
+            "status", "scan_ts", "merged_rule_id", "rule_instance_id", "variant_id", "variant_kind",
+            "target_horizon", "support_rows", "support_delta_vs_original", "coverage_multiplier_vs_original",
+            "distinct_products", "largest_product_share", "mean_forward_return", "median_forward_return",
+            "mean_max_up_pct", "touch_rate", "baseline_mean_forward_return", "original_mean_forward_return",
+            "mean_forward_return_delta_vs_original", "live_current_promoted_count", "recommendation", "reason",
+        ]
+        relaxation_cols = [
+            "status", "scan_ts", "merged_rule_id", "rule_instance_id", "condition_index", "condition_field",
+            "condition_logic", "relaxation_kind", "original_threshold", "relaxed_threshold", "original_condition",
+            "relaxed_condition", "current_failed_condition_count", "current_failure_share", "historical_condition_pass_rate",
+            "live_current_promoted_count", "variant_id", "recommendation", "reason",
+        ]
+        frontier_cols = [
+            "status", "scan_ts", "merged_rule_id", "rule_instance_id", "variant_id", "variant_kind",
+            "target_horizon", "support_rows", "coverage_multiplier_vs_original", "mean_forward_return",
+            "mean_forward_return_delta_vs_original", "touch_rate", "touch_rate_delta_vs_original",
+            "live_current_promoted_count", "live_usability_score", "recommendation", "reason",
+        ]
+        return (
+            pd.DataFrame(columns=replay_cols).assign(status=status).iloc[0:0],
+            pd.DataFrame(columns=relaxation_cols).assign(status=status).iloc[0:0],
+            pd.DataFrame(columns=frontier_cols).assign(status=status).iloc[0:0],
+        )
+
+    def _primary_horizon_for_instance(self, instance: dict[str, Any]) -> str:
+        for candidate in [
+            instance.get("recommended_primary_horizon"),
+            *((instance.get("target_horizons") or [])),
+            instance.get("secondary_monitor_horizon"),
+            "h4",
+        ]:
+            normalized = self.rule_service._normalize_horizon_token(candidate)
+            if normalized in {"h1", "h4", "h24"}:
+                return normalized
+        return "h4"
+
+    def _safe_ratio(self, numerator: float | int | None, denominator: float | int | None) -> float | None:
+        try:
+            if denominator in (None, 0):
+                return None
+            if pd.isna(denominator):
+                return None
+            if numerator is None or pd.isna(numerator):
+                return None
+            return float(numerator) / float(denominator)
+        except Exception:
+            return None
+
+    def _product_concentration_metrics(self, subset: pd.DataFrame) -> tuple[int, float | None]:
+        if subset.empty or "product_id" not in subset.columns:
+            return 0, None
+        counts = subset["product_id"].value_counts(dropna=False)
+        largest = float(counts.iloc[0] / len(subset)) if len(counts) else None
+        return int(counts.size), largest
+
+    def _historical_metrics_for_mask(self, df: pd.DataFrame, mask: pd.Series | None, horizon: str) -> dict[str, Any]:
+        return_col, max_up_col, touch_col = self.rule_service._target_columns(horizon)
+        if mask is None or df.empty:
+            subset = df.iloc[0:0].copy()
+        else:
+            aligned = mask.reindex(df.index).fillna(False).astype(bool)
+            subset = df.loc[aligned].copy()
+        if return_col in subset.columns:
+            subset = subset.loc[pd.to_numeric(subset[return_col], errors="coerce").notna()].copy()
+        distinct, largest = self._product_concentration_metrics(subset)
+        support = int(len(subset))
+        touch_rate = None
+        if touch_col and touch_col in subset.columns and support:
+            touch_rate = float(pd.to_numeric(subset[touch_col], errors="coerce").mean())
+        return {
+            "support_rows": support,
+            "distinct_products": distinct,
+            "largest_product_share": largest,
+            "mean_forward_return": float(pd.to_numeric(subset[return_col], errors="coerce").mean()) if support and return_col in subset.columns else None,
+            "median_forward_return": float(pd.to_numeric(subset[return_col], errors="coerce").median()) if support and return_col in subset.columns else None,
+            "mean_max_up_pct": float(pd.to_numeric(subset[max_up_col], errors="coerce").mean()) if support and max_up_col in subset.columns else None,
+            "touch_rate": touch_rate,
+        }
+
+    def _global_baseline_metrics(self, df: pd.DataFrame, horizon: str) -> dict[str, Any]:
+        if df.empty:
+            return self._historical_metrics_for_mask(df, None, horizon)
+        return self._historical_metrics_for_mask(df, pd.Series(True, index=df.index), horizon)
+
+    def _threshold_from_metadata(self, metadata: dict[str, Any]) -> float | None:
+        for key in ("threshold", "value"):
+            value = metadata.get(key)
+            try:
+                if value is not None and not pd.isna(value):
+                    return float(value)
+            except Exception:
+                continue
+        return None
+
+    def _jsonable_condition(self, condition: dict[str, Any]) -> str:
+        try:
+            return json.dumps(condition, sort_keys=True, default=str)
+        except Exception:
+            return str(condition)
+
+    def _relaxation_plans_for_condition(
+        self,
+        condition: dict[str, Any],
+        metadata: dict[str, Any],
+        failed_values: pd.Series,
+    ) -> list[dict[str, Any]]:
+        logic = str(metadata.get("logic") or condition.get("logic") or "").strip()
+        plans: list[dict[str, Any]] = []
+        base = dict(condition)
+        numeric_failed = pd.to_numeric(failed_values, errors="coerce").dropna()
+
+        def add_plan(kind: str, updated_condition: dict[str, Any], original_threshold: Any, relaxed_threshold: Any, reason: str) -> None:
+            plans.append({
+                "relaxation_kind": kind,
+                "condition": updated_condition,
+                "original_threshold": original_threshold,
+                "relaxed_threshold": relaxed_threshold,
+                "reason": reason,
+            })
+
+        if logic in {"in_bottom_quantile", "in_top_quantile"}:
+            try:
+                q = float(condition.get("quantile", metadata.get("quantile", 0.2)))
+            except Exception:
+                return plans
+            modest_q = min(0.50, max(q, q * 1.25 + 0.025))
+            bridge_q = min(0.75, max(modest_q, q * 1.50 + 0.05))
+            if modest_q > q:
+                c = dict(base)
+                c["logic"] = logic
+                c["quantile"] = round(float(modest_q), 6)
+                add_plan("modest_quantile_relax", c, q, modest_q, "Widen empirical quantile gate modestly.")
+            if bridge_q > modest_q:
+                c = dict(base)
+                c["logic"] = logic
+                c["quantile"] = round(float(bridge_q), 6)
+                add_plan("bridge_quantile_relax", c, q, bridge_q, "Widen empirical quantile gate enough to test a larger shadow candidate set.")
+            return plans
+
+        if logic == "between":
+            try:
+                lower = float(metadata.get("lower_bound"))
+                upper = float(metadata.get("upper_bound"))
+            except Exception:
+                return plans
+            width = max(abs(upper - lower), abs(upper), abs(lower), 1.0)
+            delta = max(width * 0.15, 0.002)
+            c = dict(base)
+            c["logic"] = "between"
+            c["lower_bound"] = lower - delta
+            c["upper_bound"] = upper + delta
+            add_plan("modest_band_widen", c, f"{lower}..{upper}", f"{c['lower_bound']}..{c['upper_bound']}", "Expand both sides of the accepted band modestly.")
+            if not numeric_failed.empty:
+                bridge_lower = min(lower, float(numeric_failed.quantile(0.10)))
+                bridge_upper = max(upper, float(numeric_failed.quantile(0.90)))
+                if bridge_lower < lower or bridge_upper > upper:
+                    c2 = dict(base)
+                    c2["logic"] = "between"
+                    c2["lower_bound"] = bridge_lower
+                    c2["upper_bound"] = bridge_upper
+                    add_plan("bridge_band_widen", c2, f"{lower}..{upper}", f"{bridge_lower}..{bridge_upper}", "Expand the band to include the central range of current near misses.")
+            return plans
+
+        threshold = self._threshold_from_metadata(metadata)
+        if threshold is None or logic not in {">", ">=", "<", "<="}:
+            return plans
+
+        delta = max(abs(threshold) * 0.15, 0.002)
+        if logic in {"<", "<="}:
+            modest = threshold + delta
+            c = dict(base)
+            c["logic"] = "<=" if logic == "<" else logic
+            c["value"] = float(modest)
+            c.pop("threshold_type", None)
+            c.pop("quantile", None)
+            add_plan("modest_threshold_relax", c, threshold, modest, "Move upper-bound threshold modestly toward current near misses.")
+            if not numeric_failed.empty:
+                bridge = float(numeric_failed.quantile(0.25))
+                if bridge > modest:
+                    c2 = dict(base)
+                    c2["logic"] = "<=" if logic == "<" else logic
+                    c2["value"] = bridge
+                    c2.pop("threshold_type", None)
+                    c2.pop("quantile", None)
+                    add_plan("bridge_nearest_threshold", c2, threshold, bridge, "Move upper-bound threshold enough to admit the nearest quartile of current failed near misses.")
+        elif logic in {">", ">="}:
+            modest = threshold - delta
+            c = dict(base)
+            c["logic"] = ">=" if logic == ">" else logic
+            c["value"] = float(modest)
+            c.pop("threshold_type", None)
+            c.pop("quantile", None)
+            add_plan("modest_threshold_relax", c, threshold, modest, "Move lower-bound threshold modestly toward current near misses.")
+            if not numeric_failed.empty:
+                bridge = float(numeric_failed.quantile(0.75))
+                if bridge < modest:
+                    c2 = dict(base)
+                    c2["logic"] = ">=" if logic == ">" else logic
+                    c2["value"] = bridge
+                    c2.pop("threshold_type", None)
+                    c2.pop("quantile", None)
+                    add_plan("bridge_nearest_threshold", c2, threshold, bridge, "Move lower-bound threshold enough to admit the nearest quartile of current failed near misses.")
+        return plans
+
+    def _recommend_relaxation(
+        self,
+        original_metrics: dict[str, Any],
+        relaxed_metrics: dict[str, Any],
+        baseline_metrics: dict[str, Any],
+        live_current_promoted_count: int,
+    ) -> tuple[str, str, float]:
+        support = int(relaxed_metrics.get("support_rows") or 0)
+        original_support = int(original_metrics.get("support_rows") or 0)
+        relaxed_mean = relaxed_metrics.get("mean_forward_return")
+        original_mean = original_metrics.get("mean_forward_return")
+        baseline_mean = baseline_metrics.get("mean_forward_return")
+        relaxed_touch = relaxed_metrics.get("touch_rate")
+        original_touch = original_metrics.get("touch_rate")
+        coverage_multiplier = self._safe_ratio(support, max(original_support, 1)) or 0.0
+        quality_delta = None if relaxed_mean is None or original_mean is None else float(relaxed_mean) - float(original_mean)
+        baseline_lift = None if relaxed_mean is None or baseline_mean is None else float(relaxed_mean) - float(baseline_mean)
+        touch_delta = None if relaxed_touch is None or original_touch is None else float(relaxed_touch) - float(original_touch)
+        live_score = (coverage_multiplier * 10.0) + (live_current_promoted_count * 2.0)
+        if relaxed_mean is not None:
+            live_score += float(relaxed_mean) * 1000.0
+        if touch_delta is not None:
+            live_score += float(touch_delta) * 20.0
+        if support < 20:
+            return "reject_fragile", "Historical support below 20 rows after relaxation.", float(live_score)
+        if original_mean is not None and quality_delta is not None and quality_delta < -0.005:
+            return "reject_quality_drop", "Relaxation materially reduces mean forward return versus the original rule.", float(live_score)
+        if baseline_lift is not None and baseline_lift < 0:
+            return "watchlist_below_baseline", "Relaxed variant is below the global historical baseline for the target horizon.", float(live_score)
+        if support > original_support and live_current_promoted_count > 0:
+            return "promote_to_shadow_candidate", "Relaxation increases historical coverage and would promote at least one current near match; validate in live shadow before considering live eligibility.", float(live_score)
+        if support > original_support:
+            return "watchlist_historical_only", "Relaxation increases historical coverage but does not currently promote live near matches.", float(live_score)
+        return "no_coverage_gain", "Relaxation does not increase historical support.", float(live_score)
+
+    def _build_adaptive_replay_tables(
+        self,
+        snapshot: pd.DataFrame,
+        rules: list[dict[str, Any]],
+        latest_ts: pd.Timestamp,
+    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        historical = self.storage.read_frame("feature_table")
+        if historical.empty:
+            return self._empty_adaptive_replay_tables("no_historical_feature_table")
+        prepared_current = self.rule_service._prepare_frame(snapshot)
+        prepared_hist = self.rule_service._prepare_frame(historical)
+        if prepared_hist.empty:
+            return self._empty_adaptive_replay_tables("no_historical_feature_table")
+
+        relaxation_rows: list[dict[str, Any]] = []
+        replay_rows: list[dict[str, Any]] = []
+        frontier_rows: list[dict[str, Any]] = []
+        variants_seen = 0
+
+        for rule in rules:
+            for instance in self.rule_service._resolve_rule_variants(rule):
+                conditions = instance.get("conditions", [])
+                if not conditions:
+                    continue
+                horizon = self._primary_horizon_for_instance(instance)
+                original_mask, hist_resolved, missing_hist = self.rule_service._build_rule_mask(prepared_hist, conditions)
+                if missing_hist:
+                    relaxation_rows.append({
+                        "status": "missing_historical_features",
+                        "scan_ts": pd.Timestamp(latest_ts).isoformat(),
+                        "merged_rule_id": instance["merged_rule_id"],
+                        "rule_instance_id": instance["instance_id"],
+                        "condition_index": None,
+                        "condition_field": "|".join(sorted(set(missing_hist))),
+                        "condition_logic": None,
+                        "relaxation_kind": None,
+                        "original_threshold": None,
+                        "relaxed_threshold": None,
+                        "original_condition": None,
+                        "relaxed_condition": None,
+                        "current_failed_condition_count": None,
+                        "current_failure_share": None,
+                        "historical_condition_pass_rate": None,
+                        "live_current_promoted_count": 0,
+                        "variant_id": None,
+                        "recommendation": "cannot_replay",
+                        "reason": "One or more rule features are missing from the historical feature table.",
+                    })
+                    continue
+                original_metrics = self._historical_metrics_for_mask(prepared_hist, original_mask, horizon)
+                baseline_metrics = self._global_baseline_metrics(prepared_hist, horizon)
+                diag_current, current_resolved, missing_current = self._condition_diagnostics(prepared_current, conditions)
+                if missing_current:
+                    continue
+                current_candidate = prepared_current.join(diag_current)
+                current_full_mask = current_candidate["__passes__"].fillna(False).astype(bool)
+                condition_count = max(int(current_candidate["condition_count"].max()) if "condition_count" in current_candidate.columns and not current_candidate.empty else len(conditions), 1)
+                min_pass_ratio = 0.0 if condition_count <= 1 else max(RELAXATION_MIN_PASS_RATIO, (condition_count - 1) / condition_count - 1e-9)
+
+                for idx, condition in enumerate(conditions, start=1):
+                    if variants_seen >= MAX_ADAPTIVE_REPLAY_VARIANTS:
+                        break
+                    pass_col = f"pass_{idx}"
+                    metadata = current_resolved[idx - 1] if idx - 1 < len(current_resolved) else {}
+                    field = metadata.get("resolved_field") or metadata.get("field") or condition.get("field")
+                    if pass_col not in current_candidate.columns:
+                        continue
+                    failed_current = current_candidate.loc[
+                        (~current_candidate[pass_col].fillna(False).astype(bool))
+                        & (~current_full_mask)
+                        & (pd.to_numeric(current_candidate.get("condition_pass_ratio"), errors="coerce") >= min_pass_ratio)
+                    ].copy()
+                    if failed_current.empty:
+                        continue
+                    failed_values = failed_current[field] if field in failed_current.columns else pd.Series(dtype=float)
+                    current_failed_count = int(len(failed_current))
+                    current_failure_share = self._safe_ratio(current_failed_count, max(int((~current_full_mask).sum()), 1))
+                    hist_pass_rate = None
+                    if idx - 1 < len(hist_resolved):
+                        hist_mask_single, _ = self.rule_service._condition_mask(prepared_hist, conditions[idx - 1])
+                        if hist_mask_single is not None:
+                            hist_pass_rate = float(hist_mask_single.fillna(False).astype(bool).mean())
+                    plans = self._relaxation_plans_for_condition(condition, metadata, failed_values)
+                    for plan in plans:
+                        if variants_seen >= MAX_ADAPTIVE_REPLAY_VARIANTS:
+                            break
+                        variants_seen += 1
+                        relaxed_conditions = [dict(c) for c in conditions]
+                        relaxed_conditions[idx - 1] = plan["condition"]
+                        relaxed_mask, _, missing_relaxed = self.rule_service._build_rule_mask(prepared_hist, relaxed_conditions)
+                        if missing_relaxed:
+                            continue
+                        current_relaxed_mask, _, _ = self.rule_service._build_rule_mask(prepared_current, relaxed_conditions)
+                        current_promoted = 0
+                        if current_relaxed_mask is not None:
+                            current_promoted = int((current_relaxed_mask.fillna(False).astype(bool) & ~current_full_mask).sum())
+                        relaxed_metrics = self._historical_metrics_for_mask(prepared_hist, relaxed_mask, horizon)
+                        recommendation, reason, live_score = self._recommend_relaxation(original_metrics, relaxed_metrics, baseline_metrics, current_promoted)
+                        support_delta = int(relaxed_metrics.get("support_rows") or 0) - int(original_metrics.get("support_rows") or 0)
+                        coverage_multiplier = self._safe_ratio(relaxed_metrics.get("support_rows"), max(int(original_metrics.get("support_rows") or 0), 1))
+                        mean_delta = None
+                        if relaxed_metrics.get("mean_forward_return") is not None and original_metrics.get("mean_forward_return") is not None:
+                            mean_delta = float(relaxed_metrics["mean_forward_return"]) - float(original_metrics["mean_forward_return"])
+                        touch_delta = None
+                        if relaxed_metrics.get("touch_rate") is not None and original_metrics.get("touch_rate") is not None:
+                            touch_delta = float(relaxed_metrics["touch_rate"]) - float(original_metrics["touch_rate"])
+                        variant_id = f"{instance['instance_id']}::relax_c{idx}_{plan['relaxation_kind']}"
+                        relaxation_rows.append({
+                            "status": "ok",
+                            "scan_ts": pd.Timestamp(latest_ts).isoformat(),
+                            "merged_rule_id": instance["merged_rule_id"],
+                            "rule_instance_id": instance["instance_id"],
+                            "condition_index": idx,
+                            "condition_field": field,
+                            "condition_logic": metadata.get("logic") or condition.get("logic"),
+                            "relaxation_kind": plan["relaxation_kind"],
+                            "original_threshold": plan["original_threshold"],
+                            "relaxed_threshold": plan["relaxed_threshold"],
+                            "original_condition": self._jsonable_condition(condition),
+                            "relaxed_condition": self._jsonable_condition(plan["condition"]),
+                            "current_failed_condition_count": current_failed_count,
+                            "current_failure_share": current_failure_share,
+                            "historical_condition_pass_rate": hist_pass_rate,
+                            "live_current_promoted_count": current_promoted,
+                            "variant_id": variant_id,
+                            "recommendation": recommendation,
+                            "reason": reason,
+                        })
+                        replay_rows.append({
+                            "status": "ok",
+                            "scan_ts": pd.Timestamp(latest_ts).isoformat(),
+                            "merged_rule_id": instance["merged_rule_id"],
+                            "rule_instance_id": instance["instance_id"],
+                            "variant_id": variant_id,
+                            "variant_kind": plan["relaxation_kind"],
+                            "target_horizon": horizon,
+                            "support_rows": relaxed_metrics.get("support_rows"),
+                            "support_delta_vs_original": support_delta,
+                            "coverage_multiplier_vs_original": coverage_multiplier,
+                            "distinct_products": relaxed_metrics.get("distinct_products"),
+                            "largest_product_share": relaxed_metrics.get("largest_product_share"),
+                            "mean_forward_return": relaxed_metrics.get("mean_forward_return"),
+                            "median_forward_return": relaxed_metrics.get("median_forward_return"),
+                            "mean_max_up_pct": relaxed_metrics.get("mean_max_up_pct"),
+                            "touch_rate": relaxed_metrics.get("touch_rate"),
+                            "baseline_mean_forward_return": baseline_metrics.get("mean_forward_return"),
+                            "original_mean_forward_return": original_metrics.get("mean_forward_return"),
+                            "mean_forward_return_delta_vs_original": mean_delta,
+                            "live_current_promoted_count": current_promoted,
+                            "recommendation": recommendation,
+                            "reason": reason,
+                        })
+                        frontier_rows.append({
+                            "status": "ok",
+                            "scan_ts": pd.Timestamp(latest_ts).isoformat(),
+                            "merged_rule_id": instance["merged_rule_id"],
+                            "rule_instance_id": instance["instance_id"],
+                            "variant_id": variant_id,
+                            "variant_kind": plan["relaxation_kind"],
+                            "target_horizon": horizon,
+                            "support_rows": relaxed_metrics.get("support_rows"),
+                            "coverage_multiplier_vs_original": coverage_multiplier,
+                            "mean_forward_return": relaxed_metrics.get("mean_forward_return"),
+                            "mean_forward_return_delta_vs_original": mean_delta,
+                            "touch_rate": relaxed_metrics.get("touch_rate"),
+                            "touch_rate_delta_vs_original": touch_delta,
+                            "live_current_promoted_count": current_promoted,
+                            "live_usability_score": live_score,
+                            "recommendation": recommendation,
+                            "reason": reason,
+                        })
+                if variants_seen >= MAX_ADAPTIVE_REPLAY_VARIANTS:
+                    break
+
+        replay_df = pd.DataFrame(replay_rows)
+        relaxation_df = pd.DataFrame(relaxation_rows)
+        frontier_df = pd.DataFrame(frontier_rows)
+        if replay_df.empty and relaxation_df.empty and frontier_df.empty:
+            return self._empty_adaptive_replay_tables("no_current_near_match_relaxations")
+        if not replay_df.empty:
+            replay_df = replay_df.sort_values(["live_current_promoted_count", "support_delta_vs_original", "mean_forward_return_delta_vs_original"], ascending=[False, False, False], na_position="last").reset_index(drop=True)
+        if not relaxation_df.empty:
+            relaxation_df = relaxation_df.sort_values(["live_current_promoted_count", "current_failed_condition_count"], ascending=[False, False], na_position="last").reset_index(drop=True)
+        if not frontier_df.empty:
+            frontier_df = frontier_df.sort_values(["live_usability_score", "live_current_promoted_count", "coverage_multiplier_vs_original"], ascending=[False, False, False], na_position="last").reset_index(drop=True)
+        return replay_df, relaxation_df, frontier_df
+
     def run_cycle(self, request: LiveScanRequest, run_id_override: str | None = None) -> dict[str, Any]:
         step = "live_scan_cycle"
         run_id = run_id_override or self.storage.make_run_id()
@@ -376,11 +808,15 @@ class LiveScannerService:
             signal_rows, skipped = self.live_shadow._evaluate_snapshot(snapshot, rules, run_id=run_id, decision_time=as_of)
             shortlist, rule_hits = self._build_scan_tables(signal_rows, latest_ts)
             near_matches, coverage_summary = self._build_near_match_tables(snapshot, rules, latest_ts, rule_hits)
+            near_match_replay, relaxation_candidates, coverage_frontier = self._build_adaptive_replay_tables(snapshot, rules, latest_ts)
 
             shortlist_path = self.storage.write_csv(shortlist, f"live_scan_results__{run_id}", compress=False)
             hits_path = self.storage.write_csv(rule_hits, f"live_scan_rule_hits__{run_id}", compress=False)
             near_path = self.storage.write_csv(near_matches, f"live_scan_near_matches__{run_id}", compress=False)
             coverage_path = self.storage.write_csv(coverage_summary, f"rule_coverage_summary__{run_id}", compress=False)
+            near_replay_path = self.storage.write_csv(near_match_replay, f"near_match_replay_summary__{run_id}", compress=False)
+            relaxation_path = self.storage.write_csv(relaxation_candidates, f"rule_relaxation_candidates__{run_id}", compress=False)
+            frontier_path = self.storage.write_csv(coverage_frontier, f"coverage_quality_frontier__{run_id}", compress=False)
             summary_df = shortlist[["scanner_rank", "product_id", "matched_rule_count", "matched_rule_ids", "best_priority", "ranking_score", "matched_primary_horizons", "data_quality_note"]].copy() if not shortlist.empty else pd.DataFrame(columns=["scanner_rank", "product_id", "matched_rule_count", "matched_rule_ids", "best_priority", "ranking_score", "matched_primary_horizons", "data_quality_note"])
             summary_path = self.storage.write_csv(summary_df, f"live_scan_summary__{run_id}", compress=False)
             manifest = {
@@ -411,25 +847,34 @@ class LiveScannerService:
                     "top_match_rule_count": int(shortlist.iloc[0]["matched_rule_count"]) if not shortlist.empty else 0,
                     "near_match_rows": int(len(near_matches)),
                     "coverage_rule_rows": int(len(coverage_summary)),
+                    "near_match_replay_rows": int(len(near_match_replay)),
+                    "relaxation_candidate_rows": int(len(relaxation_candidates)),
+                    "coverage_frontier_rows": int(len(coverage_frontier)),
                     "best_near_match_product_id": near_matches.iloc[0]["product_id"] if not near_matches.empty else None,
                     "best_near_match_rule_id": near_matches.iloc[0]["merged_rule_id"] if not near_matches.empty else None,
                     "best_condition_pass_ratio": float(near_matches.iloc[0]["condition_pass_ratio"]) if not near_matches.empty else None,
+                    "best_relaxation_rule_id": coverage_frontier.iloc[0]["merged_rule_id"] if not coverage_frontier.empty else None,
+                    "best_relaxation_variant_id": coverage_frontier.iloc[0]["variant_id"] if not coverage_frontier.empty else None,
+                    "best_relaxation_recommendation": coverage_frontier.iloc[0]["recommendation"] if not coverage_frontier.empty else None,
                     "skipped_rules": skipped,
                 },
                 "preview": shortlist.head(50).to_dict(orient="records"),
                 "near_match_preview": near_matches.head(50).to_dict(orient="records"),
                 "coverage_preview": coverage_summary.head(50).to_dict(orient="records"),
+                "near_match_replay_preview": near_match_replay.head(50).to_dict(orient="records"),
+                "relaxation_candidate_preview": relaxation_candidates.head(50).to_dict(orient="records"),
+                "coverage_quality_frontier_preview": coverage_frontier.head(50).to_dict(orient="records"),
             }
             manifest_path = self.storage.export_path(f"live_scan_manifest__{run_id}", ".json")
             self.storage.write_json(manifest, manifest_path)
             pack_path = self.storage.export_path(f"live_scan_pack__{run_id}", ".zip")
             with zipfile.ZipFile(pack_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-                for path in [shortlist_path, hits_path, near_path, coverage_path, summary_path, manifest_path]:
+                for path in [shortlist_path, hits_path, near_path, coverage_path, near_replay_path, relaxation_path, frontier_path, summary_path, manifest_path]:
                     zf.write(path, arcname=Path(path).name)
-            artifacts = [self.storage.file_info(path) for path in [shortlist_path, hits_path, near_path, coverage_path, summary_path, manifest_path, pack_path]]
+            artifacts = [self.storage.file_info(path) for path in [shortlist_path, hits_path, near_path, coverage_path, near_replay_path, relaxation_path, frontier_path, summary_path, manifest_path, pack_path]]
             manifest["artifacts"] = artifacts
             self.storage.write_latest_live_scan_manifest(manifest)
-            self.storage.update_status(step, "completed", message="Live scanner completed", run_id=run_id, latest_signal_ts=latest_ts.isoformat(), shortlist_rows=int(len(shortlist)), rule_hits=int(len(rule_hits)), near_match_rows=int(len(near_matches)), rules_evaluated=int(len(rules)), pack_artifact=pack_path.name)
+            self.storage.update_status(step, "completed", message="Live scanner completed", run_id=run_id, latest_signal_ts=latest_ts.isoformat(), shortlist_rows=int(len(shortlist)), rule_hits=int(len(rule_hits)), near_match_rows=int(len(near_matches)), near_match_replay_rows=int(len(near_match_replay)), relaxation_candidate_rows=int(len(relaxation_candidates)), rules_evaluated=int(len(rules)), pack_artifact=pack_path.name)
             return manifest
         except Exception as exc:
             self.storage.update_status(step, "failed", error=str(exc), traceback=traceback.format_exc())

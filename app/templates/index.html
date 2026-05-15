@@ -1365,6 +1365,61 @@
             </div>
           </div>
         </div>
+
+        <div class="panel-grid">
+          <div class="card span-7">
+            <div class="card-header">
+              <div>
+                <h2>Adaptive near-match replay</h2>
+                <p class="section-copy">Historical replay of relaxed shadow-candidate variants derived from current near misses. These are research outputs, not automatic promotions.</p>
+              </div>
+              <span class="pill soft">v1.8.0</span>
+            </div>
+            <div class="table-shell">
+              <div class="scroll-x">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Rule</th>
+                      <th>Variant</th>
+                      <th>Support Δ</th>
+                      <th>Mean Δ</th>
+                      <th>Promotes now</th>
+                      <th>Recommendation</th>
+                    </tr>
+                  </thead>
+                  <tbody id="liveScanReplayTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="card span-5">
+            <div class="card-header">
+              <div>
+                <h2>Relaxation candidates</h2>
+                <p class="section-copy">The exact single-condition relaxations being tested against historical outcomes.</p>
+              </div>
+              <span class="pill soft">Shadow candidates</span>
+            </div>
+            <div class="table-shell">
+              <div class="scroll-x">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Rule</th>
+                      <th>Field</th>
+                      <th>Relaxation</th>
+                      <th>Promotes</th>
+                      <th>Recommendation</th>
+                    </tr>
+                  </thead>
+                  <tbody id="liveScanRelaxationTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -2328,7 +2383,7 @@
           <td>${htmlEscape(row.failed_conditions || '')}</td>
         </tr>
       `).join('');
-      setHtml('liveScanNearMatchTableBody', nearBody || '<tr><td colspan="7">No near-match diagnostics available yet. Run a fresh scan on v1.7.0.</td></tr>');
+      setHtml('liveScanNearMatchTableBody', nearBody || '<tr><td colspan="7">No near-match diagnostics available yet. Run a fresh scan on v1.8.0.</td></tr>');
       const coverageRows = scan.coverage_preview || [];
       const coverageBody = coverageRows.map(row => `
         <tr>
@@ -2339,7 +2394,30 @@
           <td>${htmlEscape(fmtNum(row.live_hit_count_7d))}</td>
         </tr>
       `).join('');
-      setHtml('liveScanCoverageTableBody', coverageBody || '<tr><td colspan="5">No coverage telemetry available yet. Run a fresh scan on v1.7.0.</td></tr>');
+      setHtml('liveScanCoverageTableBody', coverageBody || '<tr><td colspan="5">No coverage telemetry available yet. Run a fresh scan on v1.8.0.</td></tr>');
+      const replayRows = scan.coverage_quality_frontier_preview || [];
+      const replayBody = replayRows.map(row => `
+        <tr>
+          <td>${htmlEscape(row.merged_rule_id || '')}</td>
+          <td>${htmlEscape(row.variant_kind || row.variant_id || '')}</td>
+          <td>${htmlEscape(fmtNum(row.support_rows == null || row.coverage_multiplier_vs_original == null ? null : row.support_rows))}</td>
+          <td>${row.mean_forward_return_delta_vs_original == null ? '—' : Number(row.mean_forward_return_delta_vs_original).toFixed(4)}</td>
+          <td>${htmlEscape(fmtNum(row.live_current_promoted_count))}</td>
+          <td>${htmlEscape(row.recommendation || '')}</td>
+        </tr>
+      `).join('');
+      setHtml('liveScanReplayTableBody', replayBody || '<tr><td colspan="6">No adaptive near-match replay available yet. Run a fresh scan on v1.8.0 after a historical feature table exists.</td></tr>');
+      const relaxationRows = scan.relaxation_candidate_preview || [];
+      const relaxationBody = relaxationRows.map(row => `
+        <tr>
+          <td>${htmlEscape(row.merged_rule_id || '')}</td>
+          <td>${htmlEscape(row.condition_field || '')}</td>
+          <td>${htmlEscape(row.relaxation_kind || '')}</td>
+          <td>${htmlEscape(fmtNum(row.live_current_promoted_count))}</td>
+          <td>${htmlEscape(row.recommendation || '')}</td>
+        </tr>
+      `).join('');
+      setHtml('liveScanRelaxationTableBody', relaxationBody || '<tr><td colspan="5">No relaxation candidates available yet.</td></tr>');
       const selectedLiveEligible = getSelectedRuleIds().filter(id => { const rule = ruleLibrary.find(item => ruleIdentity(item) === id); return rule?.rule_kind === 'direct_rule' && rule?.live_eligible; }).length;
       setText('liveScanConfigSummary', selectedLiveEligible ? `${selectedLiveEligible} selected live-eligible direct rules are ready to scan. The scanner evaluates the latest completed hourly snapshot and returns a ranked shortlist plus near-match diagnostics.` : 'Mark one or more direct rules as live eligible on the Rules tab, or run all live-eligible direct rules. The scanner excludes non-direct and non-live-eligible rules by default.');
     }

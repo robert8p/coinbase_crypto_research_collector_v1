@@ -378,7 +378,7 @@ def test_status_and_latest_exports_reflect_effective_run_settings_and_versioned_
     status_payload = client.get('/api/status').json()
     assert status_payload['effective_run_settings']['lookback_hours'] == 72
     assert status_payload['effective_run_settings']['max_products'] == 5
-    assert status_payload['latest_run']['app_version'] == '1.7.0'
+    assert status_payload['latest_run']['app_version'] == '1.8.0'
 
     latest = client.get('/api/export/latest').json()
     names = {item['name'] for item in latest['artifacts']}
@@ -422,7 +422,7 @@ def test_rule_backtest_library_and_run(tmp_path: Path):
     latest = client.get('/api/rule-backtests/latest')
     assert latest.status_code == 200
     latest_payload = latest.json()
-    assert latest_payload['version'] == '1.7.0'
+    assert latest_payload['version'] == '1.8.0'
     assert latest_payload['request']['horizon'] == 'h4'
 
 
@@ -565,13 +565,13 @@ def test_live_shadow_cycle_and_latest_manifest(tmp_path: Path):
     })
     assert run_resp.status_code == 200
     payload = run_resp.json()
-    assert payload['version'] == '1.7.0'
+    assert payload['version'] == '1.8.0'
     assert payload['status'] == 'queued'
 
     latest = client.get('/api/live/shadow/latest')
     assert latest.status_code == 200
     latest_payload = latest.json()
-    assert latest_payload['version'] == '1.7.0'
+    assert latest_payload['version'] == '1.8.0'
     assert latest_payload['request']['lookback_hours'] == 72
     assert any(item['name'].startswith('live_validation_pack__') for item in latest_payload['artifacts'])
 
@@ -644,7 +644,7 @@ def test_live_shadow_isolates_summary_from_legacy_and_other_scope_rows(tmp_path:
     assert run_resp.status_code == 200
 
     latest_payload = client.get('/api/live/shadow/latest').json()
-    assert latest_payload['version'] == '1.7.0'
+    assert latest_payload['version'] == '1.8.0'
     assert latest_payload['request']['validation_scope_key'].startswith('selected_rules__1__')
     assert latest_payload['state_scope']['scope_isolated_by_rule_set'] is True
     assert latest_payload['state_scope']['legacy_signal_rows_ignored'] == 1
@@ -747,13 +747,13 @@ def test_live_rule_eligibility_update_and_scan_manifest(tmp_path: Path):
     assert run_resp.status_code == 200
     payload = run_resp.json()
     assert payload['status'] == 'queued'
-    assert payload['version'] == '1.7.0'
+    assert payload['version'] == '1.8.0'
     queued_run_id = payload['run_id']
 
     latest = client.get('/api/live/scan/latest')
     assert latest.status_code == 200
     latest_payload = latest.json()
-    assert latest_payload['version'] == '1.7.0'
+    assert latest_payload['version'] == '1.8.0'
     assert latest_payload['run_id'] == queued_run_id
     assert latest_payload['request']['lookback_hours'] == 72
     assert latest_payload['summary']['rule_hits'] > 0
@@ -762,7 +762,12 @@ def test_live_rule_eligibility_update_and_scan_manifest(tmp_path: Path):
     artifact_names = {item['name'] for item in latest_payload['artifacts']}
     assert any(name.startswith('live_scan_near_matches__') for name in artifact_names)
     assert any(name.startswith('rule_coverage_summary__') for name in artifact_names)
+    assert any(name.startswith('near_match_replay_summary__') for name in artifact_names)
+    assert any(name.startswith('rule_relaxation_candidates__') for name in artifact_names)
+    assert any(name.startswith('coverage_quality_frontier__') for name in artifact_names)
     assert any(name.startswith('live_scan_pack__') for name in artifact_names)
+    assert 'coverage_quality_frontier_preview' in latest_payload
+    assert 'relaxation_candidate_preview' in latest_payload
 
 
 def test_index_contains_live_scan_tab_and_controls(tmp_path: Path):
@@ -775,6 +780,8 @@ def test_index_contains_live_scan_tab_and_controls(tmp_path: Path):
     assert '/api/live/scan/run' in html
     assert 'Closest current candidates' in html
     assert 'Coverage health' in html
+    assert 'Adaptive near-match replay' in html
+    assert 'Relaxation candidates' in html
 
 
 def test_live_scan_uses_live_scan_defaults_and_matching_path(tmp_path: Path):
@@ -802,6 +809,9 @@ def test_live_scan_uses_live_scan_defaults_and_matching_path(tmp_path: Path):
     assert latest['summary']['shortlist_rows'] > 0
     assert 'near_match_preview' in latest
     assert 'coverage_preview' in latest
+    assert 'near_match_replay_preview' in latest
+    assert 'relaxation_candidate_preview' in latest
+    assert 'coverage_quality_frontier_preview' in latest
 
 
 def test_live_scan_select_per_product_latest_includes_staggered_products():
@@ -817,6 +827,48 @@ def test_live_scan_select_per_product_latest_includes_staggered_products():
     assert str(latest_ts) == '2024-01-01 12:00:00+00:00'
     assert set(snapshot['product_id']) == {'A', 'B'}
     assert stale_products == []
+
+
+def test_adaptive_replay_generates_relaxation_outputs_from_near_misses(tmp_path: Path):
+    client = build_client(tmp_path)
+    import pandas as pd
+    import app.main as app_main
+
+    # Historical feature table with future outcomes: original rule is sparse; relaxed threshold adds coverage.
+    hist = pd.DataFrame([
+        {'product_id': 'A-USD', 'base_asset': 'A', 'quote_asset': 'USD', 'ts': pd.Timestamp('2026-01-01T00:00:00Z'), 'cb_ret_1': -0.030, 'future_close_return_h4': 0.030, 'future_max_up_pct_h4': 0.050, 'touched_up_1pct_h4': 1.0},
+        {'product_id': 'B-USD', 'base_asset': 'B', 'quote_asset': 'USD', 'ts': pd.Timestamp('2026-01-01T01:00:00Z'), 'cb_ret_1': -0.018, 'future_close_return_h4': 0.020, 'future_max_up_pct_h4': 0.030, 'touched_up_1pct_h4': 1.0},
+        {'product_id': 'C-USD', 'base_asset': 'C', 'quote_asset': 'USD', 'ts': pd.Timestamp('2026-01-01T02:00:00Z'), 'cb_ret_1': -0.012, 'future_close_return_h4': 0.010, 'future_max_up_pct_h4': 0.020, 'touched_up_1pct_h4': 1.0},
+        {'product_id': 'D-USD', 'base_asset': 'D', 'quote_asset': 'USD', 'ts': pd.Timestamp('2026-01-01T03:00:00Z'), 'cb_ret_1': 0.010, 'future_close_return_h4': -0.010, 'future_max_up_pct_h4': 0.005, 'touched_up_1pct_h4': 0.0},
+    ])
+    app_main.storage.write_frame(hist, 'feature_table')
+    snapshot = pd.DataFrame([
+        {'product_id': 'A-USD', 'base_asset': 'A', 'quote_asset': 'USD', 'ts': pd.Timestamp('2026-02-01T00:00:00Z'), 'cb_ret_1': -0.016},
+        {'product_id': 'B-USD', 'base_asset': 'B', 'quote_asset': 'USD', 'ts': pd.Timestamp('2026-02-01T00:00:00Z'), 'cb_ret_1': -0.013},
+    ])
+    rules = [{
+        'merged_rule_id': 'RELAX_RULE',
+        'name': 'Relax test rule',
+        'priority': 1,
+        'rule_kind': 'direct_rule',
+        'live_eligible': True,
+        'recommended_primary_horizon': 'h4',
+        'target_horizons': ['h4'],
+        'exact_definition': {'all_conditions': [{'field': 'cb_ret_1', 'logic': '<=', 'value': -0.02}]},
+    }]
+
+    replay, relaxation, frontier = app_main.live_scan_service._build_adaptive_replay_tables(
+        snapshot=snapshot,
+        rules=rules,
+        latest_ts=pd.Timestamp('2026-02-01T00:00:00Z'),
+    )
+
+    assert not replay.empty
+    assert not relaxation.empty
+    assert not frontier.empty
+    assert {'near_match_replay_summary__', 'rule_relaxation_candidates__', 'coverage_quality_frontier__'}
+    assert relaxation['live_current_promoted_count'].max() >= 1
+    assert 'recommendation' in frontier.columns
 
 
 def test_rule_backtest_condition_mask_coerces_string_value_for_comparison_operators(tmp_path: Path):
@@ -870,7 +922,7 @@ def test_downloadable_health_and_status_snapshots(tmp_path: Path):
     assert status.status_code == 200
     assert 'attachment; filename="status__' in status.headers.get('content-disposition', '')
     payload = status.json()
-    assert payload['latest_run']['app_version'] == '1.7.0'
+    assert payload['latest_run']['app_version'] == '1.8.0'
     assert payload['effective_run_settings']['lookback_hours'] == 72
 
 
@@ -896,7 +948,7 @@ def test_operator_snapshot_zip_contains_health_status_and_latest_manifests(tmp_p
         assert 'latest_live_shadow_manifest.json' in names
         assert 'latest_live_scan_manifest.json' in names
         status_payload = json.loads(zf.read('status.json').decode('utf-8'))
-        assert status_payload['latest_run']['app_version'] == '1.7.0'
+        assert status_payload['latest_run']['app_version'] == '1.8.0'
 
 
 def test_status_normalizes_current_app_version_and_marks_stale_failures(tmp_path: Path):
@@ -925,7 +977,7 @@ def test_status_normalizes_current_app_version_and_marks_stale_failures(tmp_path
     })
 
     payload = client.get('/api/status').json()
-    assert payload['status']['version'] == '1.7.0'
+    assert payload['status']['version'] == '1.8.0'
     step = payload['status']['steps']['live_shadow_cycle']
     assert step['stale_failure'] is True
     assert step['latest_manifest_version'] == '1.6.1'

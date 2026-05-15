@@ -614,6 +614,7 @@ class RuleBacktestService:
                 "hypothesis": rule.get("hypothesis"),
                 "source_library": rule.get("source_library", "builtin"),
                 "rule_kind": rule.get("rule_kind", "direct_rule"),
+                "priority": rule.get("priority"),
                 "recommended_primary_horizon": rule.get("recommended_primary_horizon"),
                 "secondary_monitor_horizon": rule.get("secondary_monitor_horizon"),
                 "target_horizons": rule.get("target_horizons", []),
