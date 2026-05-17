@@ -97,6 +97,21 @@ def _normalize_status_state(raw_status: dict | None, *, latest_manifest: dict, l
             step_payload["stale_failure_reason"] = (
                 f"Latest saved result for {step_name} is from app version {manifest_version}; current deployed version is {settings.app_version}."
             )
+        if step_payload.get("status") in {"running", "queued"}:
+            updated_at_raw = step_payload.get("updated_at")
+            try:
+                updated_at = datetime.fromisoformat(str(updated_at_raw).replace("Z", "+00:00"))
+                if updated_at.tzinfo is None:
+                    updated_at = updated_at.replace(tzinfo=timezone.utc)
+                age_seconds = (datetime.now(timezone.utc) - updated_at).total_seconds()
+            except Exception:
+                age_seconds = 0
+            if age_seconds > 1800:
+                step_payload["stale_running"] = True
+                step_payload["stale_running_reason"] = (
+                    f"{step_name} has been marked {step_payload.get('status')} for more than 30 minutes. "
+                    "This usually means an old background task was interrupted or replaced by a redeploy; re-run the workflow before treating this as active."
+                )
         enriched_steps[step_name] = step_payload
     payload["steps"] = enriched_steps
     return payload
@@ -166,6 +181,9 @@ def _status_payload() -> dict:
             "preview": latest_live_scan.get("preview", []),
             "near_match_preview": latest_live_scan.get("near_match_preview", []),
             "coverage_preview": latest_live_scan.get("coverage_preview", []),
+            "near_match_replay_preview": latest_live_scan.get("near_match_replay_preview", []),
+            "relaxation_candidate_preview": latest_live_scan.get("relaxation_candidate_preview", []),
+            "coverage_quality_frontier_preview": latest_live_scan.get("coverage_quality_frontier_preview", []),
             "is_current_version": latest_live_scan.get("version") == settings.app_version if latest_live_scan else False,
         },
     }

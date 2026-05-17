@@ -378,7 +378,7 @@ def test_status_and_latest_exports_reflect_effective_run_settings_and_versioned_
     status_payload = client.get('/api/status').json()
     assert status_payload['effective_run_settings']['lookback_hours'] == 72
     assert status_payload['effective_run_settings']['max_products'] == 5
-    assert status_payload['latest_run']['app_version'] == '1.8.0'
+    assert status_payload['latest_run']['app_version'] == '1.8.1'
 
     latest = client.get('/api/export/latest').json()
     names = {item['name'] for item in latest['artifacts']}
@@ -422,7 +422,7 @@ def test_rule_backtest_library_and_run(tmp_path: Path):
     latest = client.get('/api/rule-backtests/latest')
     assert latest.status_code == 200
     latest_payload = latest.json()
-    assert latest_payload['version'] == '1.8.0'
+    assert latest_payload['version'] == '1.8.1'
     assert latest_payload['request']['horizon'] == 'h4'
 
 
@@ -565,13 +565,13 @@ def test_live_shadow_cycle_and_latest_manifest(tmp_path: Path):
     })
     assert run_resp.status_code == 200
     payload = run_resp.json()
-    assert payload['version'] == '1.8.0'
+    assert payload['version'] == '1.8.1'
     assert payload['status'] == 'queued'
 
     latest = client.get('/api/live/shadow/latest')
     assert latest.status_code == 200
     latest_payload = latest.json()
-    assert latest_payload['version'] == '1.8.0'
+    assert latest_payload['version'] == '1.8.1'
     assert latest_payload['request']['lookback_hours'] == 72
     assert any(item['name'].startswith('live_validation_pack__') for item in latest_payload['artifacts'])
 
@@ -644,7 +644,7 @@ def test_live_shadow_isolates_summary_from_legacy_and_other_scope_rows(tmp_path:
     assert run_resp.status_code == 200
 
     latest_payload = client.get('/api/live/shadow/latest').json()
-    assert latest_payload['version'] == '1.8.0'
+    assert latest_payload['version'] == '1.8.1'
     assert latest_payload['request']['validation_scope_key'].startswith('selected_rules__1__')
     assert latest_payload['state_scope']['scope_isolated_by_rule_set'] is True
     assert latest_payload['state_scope']['legacy_signal_rows_ignored'] == 1
@@ -747,13 +747,13 @@ def test_live_rule_eligibility_update_and_scan_manifest(tmp_path: Path):
     assert run_resp.status_code == 200
     payload = run_resp.json()
     assert payload['status'] == 'queued'
-    assert payload['version'] == '1.8.0'
+    assert payload['version'] == '1.8.1'
     queued_run_id = payload['run_id']
 
     latest = client.get('/api/live/scan/latest')
     assert latest.status_code == 200
     latest_payload = latest.json()
-    assert latest_payload['version'] == '1.8.0'
+    assert latest_payload['version'] == '1.8.1'
     assert latest_payload['run_id'] == queued_run_id
     assert latest_payload['request']['lookback_hours'] == 72
     assert latest_payload['summary']['rule_hits'] > 0
@@ -922,7 +922,7 @@ def test_downloadable_health_and_status_snapshots(tmp_path: Path):
     assert status.status_code == 200
     assert 'attachment; filename="status__' in status.headers.get('content-disposition', '')
     payload = status.json()
-    assert payload['latest_run']['app_version'] == '1.8.0'
+    assert payload['latest_run']['app_version'] == '1.8.1'
     assert payload['effective_run_settings']['lookback_hours'] == 72
 
 
@@ -948,7 +948,7 @@ def test_operator_snapshot_zip_contains_health_status_and_latest_manifests(tmp_p
         assert 'latest_live_shadow_manifest.json' in names
         assert 'latest_live_scan_manifest.json' in names
         status_payload = json.loads(zf.read('status.json').decode('utf-8'))
-        assert status_payload['latest_run']['app_version'] == '1.8.0'
+        assert status_payload['latest_run']['app_version'] == '1.8.1'
 
 
 def test_status_normalizes_current_app_version_and_marks_stale_failures(tmp_path: Path):
@@ -977,7 +977,7 @@ def test_status_normalizes_current_app_version_and_marks_stale_failures(tmp_path
     })
 
     payload = client.get('/api/status').json()
-    assert payload['status']['version'] == '1.8.0'
+    assert payload['status']['version'] == '1.8.1'
     step = payload['status']['steps']['live_shadow_cycle']
     assert step['stale_failure'] is True
     assert step['latest_manifest_version'] == '1.6.1'
@@ -1062,3 +1062,58 @@ def test_index_defines_download_snapshot_helper(tmp_path: Path):
     response = client.get('/')
     assert response.status_code == 200
     assert 'async function downloadSnapshot(url)' in response.text
+
+
+def test_live_scan_adaptive_replay_failure_is_fail_soft(tmp_path: Path, monkeypatch):
+    client = build_client(tmp_path)
+    import app.main as app_main
+    import pandas as pd
+
+    library = client.get('/api/rule-backtests/library').json()['rules']
+    direct_rule_ids = [rule['merged_rule_id'] for rule in library if rule.get('rule_kind', 'direct_rule') == 'direct_rule']
+    client.post('/api/rule-backtests/library/live-eligibility', json={'rule_ids': direct_rule_ids, 'live_eligible': True})
+
+    def boom(*args, **kwargs):
+        raise RuntimeError('adaptive replay boom')
+
+    monkeypatch.setattr(app_main.live_scan_service, '_build_adaptive_replay_tables', boom)
+    run = client.post('/api/live/scan/run', json={
+        'selection_mode': 'all',
+        'lookback_hours': 72,
+        'max_products': 6,
+        'refresh_references': False,
+        'as_of_time_iso': '2026-05-01T12:00:00Z',
+    })
+    assert run.status_code == 200
+    latest = client.get('/api/live/scan/latest').json()
+    assert latest['version'] == '1.8.1'
+    assert latest['summary']['adaptive_replay_warning'] == 'adaptive replay boom'
+    artifact_names = {item['name'] for item in latest['artifacts']}
+    assert any(name.startswith('live_scan_pack__') for name in artifact_names)
+    assert any(name.startswith('near_match_replay_summary__') for name in artifact_names)
+    assert latest['near_match_replay_preview'][0]['status'] == 'adaptive_replay_failed'
+
+
+def test_status_marks_long_running_steps_as_stale(tmp_path: Path):
+    client = build_client(tmp_path)
+    import app.main as app_main
+
+    app_main.storage.write_json({
+        'app': app_main.settings.app_name,
+        'version': '1.8.0',
+        'updated_at': '2026-05-15T22:00:00+00:00',
+        'steps': {
+            'live_scan_cycle': {
+                'status': 'running',
+                'run_id': 'old-run',
+                'phase': 'adaptive_replay',
+                'updated_at': '2020-01-01T00:00:00+00:00',
+            }
+        },
+    }, app_main.storage.status_path)
+
+    payload = client.get('/api/status').json()
+    step = payload['status']['steps']['live_scan_cycle']
+    assert step['status'] == 'running'
+    assert step['stale_running'] is True
+    assert 'more than 30 minutes' in step['stale_running_reason']

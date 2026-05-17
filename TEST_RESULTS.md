@@ -1,20 +1,19 @@
 # Test Results
 
-Version: 1.8.0
+Version: 1.8.1
 
 Validation performed in this build:
 
-- Live-scan adaptive near-match replay outputs added and covered by regression assertions.
-- Rule relaxation candidate outputs added and covered by regression assertions.
-- Coverage-quality frontier outputs added and covered by regression assertions.
-- Scan UI updated with Adaptive near-match replay and Relaxation candidates sections.
-- Existing regression suite was run in split groups to avoid long single-command timeout in the execution environment.
+- Live-scan adaptive replay is now bounded and fail-soft so the core scan pack can complete reliably.
+- Adaptive replay exceptions now produce downloadable diagnostic rows instead of failing the whole live scan.
+- Long-running / interrupted background tasks are now classified as stale-running warnings after 30 minutes.
+- Existing v1.8.0 adaptive replay outputs remain present in scan packs.
+- Regression coverage added for adaptive replay fail-soft behavior and stale-running status classification.
 
 Results:
 
 - 15 passed
-- 10 passed
-- 9 passed
-- 9 passed
+- 15 passed
+- 15 passed
 
-Combined: all 43 collected tests passed across split runs.
+Combined: all 45 collected tests passed across split runs.

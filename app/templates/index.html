@@ -1373,7 +1373,7 @@
                 <h2>Adaptive near-match replay</h2>
                 <p class="section-copy">Historical replay of relaxed shadow-candidate variants derived from current near misses. These are research outputs, not automatic promotions.</p>
               </div>
-              <span class="pill soft">v1.8.0</span>
+              <span class="pill soft">v1.8.1</span>
             </div>
             <div class="table-shell">
               <div class="scroll-x">
@@ -2058,6 +2058,8 @@
           } else {
             warnings.push({tone: 'danger', title: `${key} failed`, text: step.error});
           }
+        } else if (step?.stale_running) {
+          warnings.push({tone: 'warning', title: `${key} appears stale`, text: step.stale_running_reason || 'This workflow has been running for longer than expected. Re-run it before treating it as active.'});
         }
       });
       if ((data.exports || []).length === 0) warnings.push({tone: 'warning', title: 'No exports visible yet', text: 'Run the full pipeline or build the research export before expecting downloadable artifacts.'});
@@ -2383,7 +2385,7 @@
           <td>${htmlEscape(row.failed_conditions || '')}</td>
         </tr>
       `).join('');
-      setHtml('liveScanNearMatchTableBody', nearBody || '<tr><td colspan="7">No near-match diagnostics available yet. Run a fresh scan on v1.8.0.</td></tr>');
+      setHtml('liveScanNearMatchTableBody', nearBody || '<tr><td colspan="7">No near-match diagnostics available yet. Run a fresh scan on v1.8.1.</td></tr>');
       const coverageRows = scan.coverage_preview || [];
       const coverageBody = coverageRows.map(row => `
         <tr>
@@ -2394,7 +2396,7 @@
           <td>${htmlEscape(fmtNum(row.live_hit_count_7d))}</td>
         </tr>
       `).join('');
-      setHtml('liveScanCoverageTableBody', coverageBody || '<tr><td colspan="5">No coverage telemetry available yet. Run a fresh scan on v1.8.0.</td></tr>');
+      setHtml('liveScanCoverageTableBody', coverageBody || '<tr><td colspan="5">No coverage telemetry available yet. Run a fresh scan on v1.8.1.</td></tr>');
       const replayRows = scan.coverage_quality_frontier_preview || [];
       const replayBody = replayRows.map(row => `
         <tr>
@@ -2406,7 +2408,7 @@
           <td>${htmlEscape(row.recommendation || '')}</td>
         </tr>
       `).join('');
-      setHtml('liveScanReplayTableBody', replayBody || '<tr><td colspan="6">No adaptive near-match replay available yet. Run a fresh scan on v1.8.0 after a historical feature table exists.</td></tr>');
+      setHtml('liveScanReplayTableBody', replayBody || '<tr><td colspan="6">No adaptive near-match replay available yet. Run a fresh scan on v1.8.1 after a historical feature table exists.</td></tr>');
       const relaxationRows = scan.relaxation_candidate_preview || [];
       const relaxationBody = relaxationRows.map(row => `
         <tr>

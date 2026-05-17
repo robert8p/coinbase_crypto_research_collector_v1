@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 import traceback
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -17,7 +18,9 @@ from .settings import Settings
 from .storage import StorageManager
 
 
-MAX_ADAPTIVE_REPLAY_VARIANTS = 60
+MAX_ADAPTIVE_REPLAY_VARIANTS = 24
+MAX_ADAPTIVE_REPLAY_SECONDS = 25.0
+MAX_ADAPTIVE_HISTORICAL_ROWS = 120_000
 RELAXATION_MIN_PASS_RATIO = 0.5
 
 
@@ -381,6 +384,53 @@ class LiveScannerService:
             pd.DataFrame(columns=frontier_cols).assign(status=status).iloc[0:0],
         )
 
+    def _adaptive_status_row(self, status: str, latest_ts: pd.Timestamp, reason: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        replay, relaxation, frontier = self._empty_adaptive_replay_tables(status)
+        scan_ts = pd.Timestamp(latest_ts).isoformat()
+        common = {
+            "status": status,
+            "scan_ts": scan_ts,
+            "merged_rule_id": None,
+            "rule_instance_id": None,
+            "variant_id": None,
+            "recommendation": "not_evaluated",
+            "reason": reason,
+        }
+        replay = pd.concat([replay, pd.DataFrame([{**common, "variant_kind": None, "target_horizon": None}])], ignore_index=True)
+        relaxation = pd.concat([relaxation, pd.DataFrame([{
+            **common,
+            "condition_index": None,
+            "condition_field": None,
+            "condition_logic": None,
+            "relaxation_kind": None,
+            "original_threshold": None,
+            "relaxed_threshold": None,
+            "original_condition": None,
+            "relaxed_condition": None,
+            "current_failed_condition_count": None,
+            "current_failure_share": None,
+            "historical_condition_pass_rate": None,
+            "live_current_promoted_count": 0,
+        }])], ignore_index=True)
+        frontier = pd.concat([frontier, pd.DataFrame([{**common, "variant_kind": None, "target_horizon": None}])], ignore_index=True)
+        return replay, relaxation, frontier
+
+    def _append_adaptive_status_note(
+        self,
+        replay_df: pd.DataFrame,
+        relaxation_df: pd.DataFrame,
+        frontier_df: pd.DataFrame,
+        status: str,
+        latest_ts: pd.Timestamp,
+        reason: str,
+    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        note_replay, note_relaxation, note_frontier = self._adaptive_status_row(status, latest_ts, reason)
+        return (
+            pd.concat([replay_df, note_replay], ignore_index=True),
+            pd.concat([relaxation_df, note_relaxation], ignore_index=True),
+            pd.concat([frontier_df, note_frontier], ignore_index=True),
+        )
+
     def _primary_horizon_for_instance(self, instance: dict[str, Any]) -> str:
         for candidate in [
             instance.get("recommended_primary_horizon"),
@@ -602,21 +652,45 @@ class LiveScannerService:
         rules: list[dict[str, Any]],
         latest_ts: pd.Timestamp,
     ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        started = time.monotonic()
+        deadline = started + MAX_ADAPTIVE_REPLAY_SECONDS
         historical = self.storage.read_frame("feature_table")
         if historical.empty:
-            return self._empty_adaptive_replay_tables("no_historical_feature_table")
+            return self._adaptive_status_row("no_historical_feature_table", latest_ts, "No historical feature table exists yet; adaptive replay was skipped.")
+        historical_rows_available = int(len(historical))
+        historical_rows_used = historical_rows_available
+        historical_sample_note = "full_historical_feature_table"
+        if historical_rows_available > MAX_ADAPTIVE_HISTORICAL_ROWS:
+            historical_sample_note = f"bounded_recent_sample_{MAX_ADAPTIVE_HISTORICAL_ROWS}_of_{historical_rows_available}"
+            if "ts" in historical.columns:
+                historical = historical.copy()
+                historical["_ts_for_adaptive_sample"] = pd.to_datetime(historical["ts"], utc=True, errors="coerce")
+                historical = historical.sort_values("_ts_for_adaptive_sample").tail(MAX_ADAPTIVE_HISTORICAL_ROWS).drop(columns=["_ts_for_adaptive_sample"], errors="ignore")
+            else:
+                historical = historical.tail(MAX_ADAPTIVE_HISTORICAL_ROWS).copy()
+            historical_rows_used = int(len(historical))
         prepared_current = self.rule_service._prepare_frame(snapshot)
         prepared_hist = self.rule_service._prepare_frame(historical)
         if prepared_hist.empty:
-            return self._empty_adaptive_replay_tables("no_historical_feature_table")
+            return self._adaptive_status_row("no_historical_feature_table", latest_ts, "Historical feature table exists but could not be prepared for adaptive replay.")
 
         relaxation_rows: list[dict[str, Any]] = []
         replay_rows: list[dict[str, Any]] = []
         frontier_rows: list[dict[str, Any]] = []
         variants_seen = 0
+        time_budget_exhausted = False
+
+        def budget_exhausted() -> bool:
+            return time.monotonic() >= deadline
 
         for rule in rules:
+            if budget_exhausted():
+                time_budget_exhausted = True
+                break
             for instance in self.rule_service._resolve_rule_variants(rule):
+                if budget_exhausted():
+                    time_budget_exhausted = True
+                    break
                 conditions = instance.get("conditions", [])
                 if not conditions:
                     continue
@@ -656,6 +730,9 @@ class LiveScannerService:
                 min_pass_ratio = 0.0 if condition_count <= 1 else max(RELAXATION_MIN_PASS_RATIO, (condition_count - 1) / condition_count - 1e-9)
 
                 for idx, condition in enumerate(conditions, start=1):
+                    if budget_exhausted():
+                        time_budget_exhausted = True
+                        break
                     if variants_seen >= MAX_ADAPTIVE_REPLAY_VARIANTS:
                         break
                     pass_col = f"pass_{idx}"
@@ -680,6 +757,9 @@ class LiveScannerService:
                             hist_pass_rate = float(hist_mask_single.fillna(False).astype(bool).mean())
                     plans = self._relaxation_plans_for_condition(condition, metadata, failed_values)
                     for plan in plans:
+                        if budget_exhausted():
+                            time_budget_exhausted = True
+                            break
                         if variants_seen >= MAX_ADAPTIVE_REPLAY_VARIANTS:
                             break
                         variants_seen += 1
@@ -774,7 +854,23 @@ class LiveScannerService:
         relaxation_df = pd.DataFrame(relaxation_rows)
         frontier_df = pd.DataFrame(frontier_rows)
         if replay_df.empty and relaxation_df.empty and frontier_df.empty:
-            return self._empty_adaptive_replay_tables("no_current_near_match_relaxations")
+            return self._adaptive_status_row("no_current_near_match_relaxations", latest_ts, "No current near-match condition relaxations were available to replay.")
+        for df in (replay_df, relaxation_df, frontier_df):
+            if not df.empty:
+                df["historical_rows_available"] = historical_rows_available
+                df["historical_rows_used"] = historical_rows_used
+                df["historical_sample_note"] = historical_sample_note
+                df["adaptive_replay_seconds_budget"] = MAX_ADAPTIVE_REPLAY_SECONDS
+                df["adaptive_replay_variants_evaluated"] = variants_seen
+        if time_budget_exhausted:
+            replay_df, relaxation_df, frontier_df = self._append_adaptive_status_note(
+                replay_df,
+                relaxation_df,
+                frontier_df,
+                "adaptive_replay_time_budget_exhausted",
+                latest_ts,
+                "Adaptive replay returned bounded partial results because the live scan time budget was reached.",
+            )
         if not replay_df.empty:
             replay_df = replay_df.sort_values(["live_current_promoted_count", "support_delta_vs_original", "mean_forward_return_delta_vs_original"], ascending=[False, False, False], na_position="last").reset_index(drop=True)
         if not relaxation_df.empty:
@@ -808,7 +904,46 @@ class LiveScannerService:
             signal_rows, skipped = self.live_shadow._evaluate_snapshot(snapshot, rules, run_id=run_id, decision_time=as_of)
             shortlist, rule_hits = self._build_scan_tables(signal_rows, latest_ts)
             near_matches, coverage_summary = self._build_near_match_tables(snapshot, rules, latest_ts, rule_hits)
-            near_match_replay, relaxation_candidates, coverage_frontier = self._build_adaptive_replay_tables(snapshot, rules, latest_ts)
+            self.storage.update_status(
+                step,
+                "running",
+                message="Running bounded adaptive near-match replay",
+                phase="adaptive_replay",
+                latest_signal_ts=latest_ts.isoformat(),
+                snapshot_rows=int(len(snapshot)),
+                shortlist_rows=int(len(shortlist)),
+                rule_hits=int(len(rule_hits)),
+                near_match_rows=int(len(near_matches)),
+                rules_evaluated=int(len(rules)),
+                adaptive_replay_seconds_budget=MAX_ADAPTIVE_REPLAY_SECONDS,
+                adaptive_replay_variant_cap=MAX_ADAPTIVE_REPLAY_VARIANTS,
+            )
+            adaptive_warning = None
+            try:
+                near_match_replay, relaxation_candidates, coverage_frontier = self._build_adaptive_replay_tables(snapshot, rules, latest_ts)
+            except Exception as adaptive_exc:
+                adaptive_warning = str(adaptive_exc)
+                near_match_replay, relaxation_candidates, coverage_frontier = self._adaptive_status_row(
+                    "adaptive_replay_failed",
+                    latest_ts,
+                    f"Adaptive replay failed, but the core live scan completed: {adaptive_exc}",
+                )
+
+            self.storage.update_status(
+                step,
+                "running",
+                message="Writing live scan artifacts",
+                phase="writing_artifacts",
+                latest_signal_ts=latest_ts.isoformat(),
+                snapshot_rows=int(len(snapshot)),
+                shortlist_rows=int(len(shortlist)),
+                rule_hits=int(len(rule_hits)),
+                near_match_rows=int(len(near_matches)),
+                near_match_replay_rows=int(len(near_match_replay)),
+                relaxation_candidate_rows=int(len(relaxation_candidates)),
+                coverage_frontier_rows=int(len(coverage_frontier)),
+                adaptive_replay_warning=adaptive_warning,
+            )
 
             shortlist_path = self.storage.write_csv(shortlist, f"live_scan_results__{run_id}", compress=False)
             hits_path = self.storage.write_csv(rule_hits, f"live_scan_rule_hits__{run_id}", compress=False)
@@ -856,6 +991,7 @@ class LiveScannerService:
                     "best_relaxation_rule_id": coverage_frontier.iloc[0]["merged_rule_id"] if not coverage_frontier.empty else None,
                     "best_relaxation_variant_id": coverage_frontier.iloc[0]["variant_id"] if not coverage_frontier.empty else None,
                     "best_relaxation_recommendation": coverage_frontier.iloc[0]["recommendation"] if not coverage_frontier.empty else None,
+                    "adaptive_replay_warning": adaptive_warning,
                     "skipped_rules": skipped,
                 },
                 "preview": shortlist.head(50).to_dict(orient="records"),
@@ -874,7 +1010,7 @@ class LiveScannerService:
             artifacts = [self.storage.file_info(path) for path in [shortlist_path, hits_path, near_path, coverage_path, near_replay_path, relaxation_path, frontier_path, summary_path, manifest_path, pack_path]]
             manifest["artifacts"] = artifacts
             self.storage.write_latest_live_scan_manifest(manifest)
-            self.storage.update_status(step, "completed", message="Live scanner completed", run_id=run_id, latest_signal_ts=latest_ts.isoformat(), shortlist_rows=int(len(shortlist)), rule_hits=int(len(rule_hits)), near_match_rows=int(len(near_matches)), near_match_replay_rows=int(len(near_match_replay)), relaxation_candidate_rows=int(len(relaxation_candidates)), rules_evaluated=int(len(rules)), pack_artifact=pack_path.name)
+            self.storage.update_status(step, "completed", message="Live scanner completed", run_id=run_id, latest_signal_ts=latest_ts.isoformat(), shortlist_rows=int(len(shortlist)), rule_hits=int(len(rule_hits)), near_match_rows=int(len(near_matches)), near_match_replay_rows=int(len(near_match_replay)), relaxation_candidate_rows=int(len(relaxation_candidates)), coverage_frontier_rows=int(len(coverage_frontier)), rules_evaluated=int(len(rules)), adaptive_replay_warning=adaptive_warning, pack_artifact=pack_path.name)
             return manifest
         except Exception as exc:
             self.storage.update_status(step, "failed", error=str(exc), traceback=traceback.format_exc())
