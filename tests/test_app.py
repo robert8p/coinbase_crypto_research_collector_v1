@@ -378,7 +378,7 @@ def test_status_and_latest_exports_reflect_effective_run_settings_and_versioned_
     status_payload = client.get('/api/status').json()
     assert status_payload['effective_run_settings']['lookback_hours'] == 72
     assert status_payload['effective_run_settings']['max_products'] == 5
-    assert status_payload['latest_run']['app_version'] == '1.8.1'
+    assert status_payload['latest_run']['app_version'] == '1.9.0'
 
     latest = client.get('/api/export/latest').json()
     names = {item['name'] for item in latest['artifacts']}
@@ -422,7 +422,7 @@ def test_rule_backtest_library_and_run(tmp_path: Path):
     latest = client.get('/api/rule-backtests/latest')
     assert latest.status_code == 200
     latest_payload = latest.json()
-    assert latest_payload['version'] == '1.8.1'
+    assert latest_payload['version'] == '1.9.0'
     assert latest_payload['request']['horizon'] == 'h4'
 
 
@@ -565,13 +565,13 @@ def test_live_shadow_cycle_and_latest_manifest(tmp_path: Path):
     })
     assert run_resp.status_code == 200
     payload = run_resp.json()
-    assert payload['version'] == '1.8.1'
+    assert payload['version'] == '1.9.0'
     assert payload['status'] == 'queued'
 
     latest = client.get('/api/live/shadow/latest')
     assert latest.status_code == 200
     latest_payload = latest.json()
-    assert latest_payload['version'] == '1.8.1'
+    assert latest_payload['version'] == '1.9.0'
     assert latest_payload['request']['lookback_hours'] == 72
     assert any(item['name'].startswith('live_validation_pack__') for item in latest_payload['artifacts'])
 
@@ -644,7 +644,7 @@ def test_live_shadow_isolates_summary_from_legacy_and_other_scope_rows(tmp_path:
     assert run_resp.status_code == 200
 
     latest_payload = client.get('/api/live/shadow/latest').json()
-    assert latest_payload['version'] == '1.8.1'
+    assert latest_payload['version'] == '1.9.0'
     assert latest_payload['request']['validation_scope_key'].startswith('selected_rules__1__')
     assert latest_payload['state_scope']['scope_isolated_by_rule_set'] is True
     assert latest_payload['state_scope']['legacy_signal_rows_ignored'] == 1
@@ -747,13 +747,13 @@ def test_live_rule_eligibility_update_and_scan_manifest(tmp_path: Path):
     assert run_resp.status_code == 200
     payload = run_resp.json()
     assert payload['status'] == 'queued'
-    assert payload['version'] == '1.8.1'
+    assert payload['version'] == '1.9.0'
     queued_run_id = payload['run_id']
 
     latest = client.get('/api/live/scan/latest')
     assert latest.status_code == 200
     latest_payload = latest.json()
-    assert latest_payload['version'] == '1.8.1'
+    assert latest_payload['version'] == '1.9.0'
     assert latest_payload['run_id'] == queued_run_id
     assert latest_payload['request']['lookback_hours'] == 72
     assert latest_payload['summary']['rule_hits'] > 0
@@ -765,9 +765,14 @@ def test_live_rule_eligibility_update_and_scan_manifest(tmp_path: Path):
     assert any(name.startswith('near_match_replay_summary__') for name in artifact_names)
     assert any(name.startswith('rule_relaxation_candidates__') for name in artifact_names)
     assert any(name.startswith('coverage_quality_frontier__') for name in artifact_names)
+    assert any(name.startswith('orthogonal_candidate_discovery__') for name in artifact_names)
+    assert any(name.startswith('promotion_gate_summary__') for name in artifact_names)
+    assert any(name.startswith('orthogonal_rule_candidates__') for name in artifact_names)
     assert any(name.startswith('live_scan_pack__') for name in artifact_names)
     assert 'coverage_quality_frontier_preview' in latest_payload
     assert 'relaxation_candidate_preview' in latest_payload
+    assert 'orthogonal_candidate_preview' in latest_payload
+    assert 'promotion_gate_preview' in latest_payload
 
 
 def test_index_contains_live_scan_tab_and_controls(tmp_path: Path):
@@ -782,6 +787,8 @@ def test_index_contains_live_scan_tab_and_controls(tmp_path: Path):
     assert 'Coverage health' in html
     assert 'Adaptive near-match replay' in html
     assert 'Relaxation candidates' in html
+    assert 'Orthogonal candidate discovery' in html
+    assert 'Promotion gates' in html
 
 
 def test_live_scan_uses_live_scan_defaults_and_matching_path(tmp_path: Path):
@@ -812,6 +819,8 @@ def test_live_scan_uses_live_scan_defaults_and_matching_path(tmp_path: Path):
     assert 'near_match_replay_preview' in latest
     assert 'relaxation_candidate_preview' in latest
     assert 'coverage_quality_frontier_preview' in latest
+    assert 'orthogonal_candidate_preview' in latest
+    assert 'promotion_gate_preview' in latest
 
 
 def test_live_scan_select_per_product_latest_includes_staggered_products():
@@ -922,7 +931,7 @@ def test_downloadable_health_and_status_snapshots(tmp_path: Path):
     assert status.status_code == 200
     assert 'attachment; filename="status__' in status.headers.get('content-disposition', '')
     payload = status.json()
-    assert payload['latest_run']['app_version'] == '1.8.1'
+    assert payload['latest_run']['app_version'] == '1.9.0'
     assert payload['effective_run_settings']['lookback_hours'] == 72
 
 
@@ -948,7 +957,7 @@ def test_operator_snapshot_zip_contains_health_status_and_latest_manifests(tmp_p
         assert 'latest_live_shadow_manifest.json' in names
         assert 'latest_live_scan_manifest.json' in names
         status_payload = json.loads(zf.read('status.json').decode('utf-8'))
-        assert status_payload['latest_run']['app_version'] == '1.8.1'
+        assert status_payload['latest_run']['app_version'] == '1.9.0'
 
 
 def test_status_normalizes_current_app_version_and_marks_stale_failures(tmp_path: Path):
@@ -977,7 +986,7 @@ def test_status_normalizes_current_app_version_and_marks_stale_failures(tmp_path
     })
 
     payload = client.get('/api/status').json()
-    assert payload['status']['version'] == '1.8.1'
+    assert payload['status']['version'] == '1.9.0'
     step = payload['status']['steps']['live_shadow_cycle']
     assert step['stale_failure'] is True
     assert step['latest_manifest_version'] == '1.6.1'
@@ -1086,11 +1095,12 @@ def test_live_scan_adaptive_replay_failure_is_fail_soft(tmp_path: Path, monkeypa
     })
     assert run.status_code == 200
     latest = client.get('/api/live/scan/latest').json()
-    assert latest['version'] == '1.8.1'
+    assert latest['version'] == '1.9.0'
     assert latest['summary']['adaptive_replay_warning'] == 'adaptive replay boom'
     artifact_names = {item['name'] for item in latest['artifacts']}
     assert any(name.startswith('live_scan_pack__') for name in artifact_names)
     assert any(name.startswith('near_match_replay_summary__') for name in artifact_names)
+    assert any(name.startswith('orthogonal_candidate_discovery__') for name in artifact_names)
     assert latest['near_match_replay_preview'][0]['status'] == 'adaptive_replay_failed'
 
 
@@ -1117,3 +1127,64 @@ def test_status_marks_long_running_steps_as_stale(tmp_path: Path):
     assert step['status'] == 'running'
     assert step['stale_running'] is True
     assert 'more than 30 minutes' in step['stale_running_reason']
+
+
+def test_orthogonal_discovery_generates_promotion_gate_outputs(tmp_path: Path):
+    client = build_client(tmp_path)
+    import pandas as pd
+    import app.main as app_main
+
+    rows = []
+    for i in range(80):
+        product = f"P{i % 10}-USD"
+        strong = i < 18
+        rows.append({
+            'product_id': product,
+            'base_asset': f"P{i % 10}",
+            'quote_asset': 'USD',
+            'ts': pd.Timestamp('2026-01-01T00:00:00Z') + pd.Timedelta(hours=i),
+            'cs_coinbase_vs_coinapi_return_diff': 0.030 if strong else -0.002,
+            'cb_ret_1': 0.001,
+            'cb_ema_26_dist': 0.0,
+            'cb_dollar_volume_proxy': 500000.0,
+            'future_close_return_h4': 0.030 if strong else -0.002,
+            'future_max_up_pct_h4': 0.050 if strong else 0.003,
+            'touched_up_1pct_h4': 1.0 if strong else 0.0,
+        })
+    hist = pd.DataFrame(rows)
+    app_main.storage.write_frame(hist, 'feature_table')
+    snapshot = pd.DataFrame([
+        {
+            'product_id': 'LIVE-USD',
+            'base_asset': 'LIVE',
+            'quote_asset': 'USD',
+            'ts': pd.Timestamp('2026-02-01T00:00:00Z'),
+            'cs_coinbase_vs_coinapi_return_diff': 0.040,
+            'cb_ret_1': 0.0,
+            'cb_ema_26_dist': 0.0,
+            'cb_dollar_volume_proxy': 750000.0,
+        }
+    ])
+    current_rules = [{
+        'merged_rule_id': 'CURRENT_DIP_RULE',
+        'name': 'Current dip rule',
+        'rule_kind': 'direct_rule',
+        'live_eligible': True,
+        'recommended_primary_horizon': 'h4',
+        'target_horizons': ['h4'],
+        'exact_definition': {'all_conditions': [{'field': 'cb_ema_26_dist', 'logic': '<=', 'value': -0.03}]},
+    }]
+
+    discovery, gates, payload = app_main.live_scan_service._build_orthogonal_discovery_tables(
+        snapshot=snapshot,
+        rules=current_rules,
+        latest_ts=pd.Timestamp('2026-02-01T00:00:00Z'),
+    )
+
+    assert not discovery.empty
+    assert not gates.empty
+    assert 'promotion_gate_status' in discovery.columns
+    assert any(discovery['candidate_id'].astype(str).str.contains('CS_COINBASE_VS_COINAPI_RETURN_DIFF'))
+    assert any(gates['promotion_gate_status'].isin(['shadow_candidate_ready', 'historical_watchlist_ready', 'rejected_by_gate']))
+    assert payload['artifact_type'] == 'orthogonal_rule_candidates'
+    assert 'generated_candidates' in payload

@@ -22,6 +22,12 @@ MAX_ADAPTIVE_REPLAY_VARIANTS = 24
 MAX_ADAPTIVE_REPLAY_SECONDS = 25.0
 MAX_ADAPTIVE_HISTORICAL_ROWS = 120_000
 RELAXATION_MIN_PASS_RATIO = 0.5
+MAX_ORTHOGONAL_DISCOVERY_SECONDS = 25.0
+MAX_ORTHOGONAL_HISTORICAL_ROWS = 120_000
+MAX_ORTHOGONAL_CANDIDATES = 48
+ORTHOGONAL_MIN_BASELINE_LIFT = 0.002
+ORTHOGONAL_MIN_TOUCH_LIFT = 0.03
+ORTHOGONAL_MAX_PRODUCT_SHARE = 0.35
 
 
 def _select_per_product_latest(feature_df: pd.DataFrame, freshness_hours: int = 2) -> tuple[pd.DataFrame, list[str], pd.Timestamp | None]:
@@ -879,6 +885,447 @@ class LiveScannerService:
             frontier_df = frontier_df.sort_values(["live_usability_score", "live_current_promoted_count", "coverage_multiplier_vs_original"], ascending=[False, False, False], na_position="last").reset_index(drop=True)
         return replay_df, relaxation_df, frontier_df
 
+
+    def _empty_orthogonal_discovery_tables(self, status: str = "no_orthogonal_discovery") -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+        discovery_cols = [
+            "status", "scan_ts", "candidate_id", "candidate_name", "candidate_family", "candidate_kind",
+            "target_horizon", "conditions_json", "anchor_field", "source_families", "orthogonality_score",
+            "orthogonality_reason", "support_rows", "distinct_products", "largest_product_share",
+            "mean_forward_return", "median_forward_return", "mean_max_up_pct", "touch_rate",
+            "baseline_mean_forward_return", "baseline_touch_rate", "baseline_lift", "touch_lift",
+            "live_current_matches", "promotion_score", "recommendation", "reason",
+            "historical_rows_available", "historical_rows_used", "historical_sample_note",
+        ]
+        gate_cols = [
+            "status", "scan_ts", "candidate_id", "candidate_name", "support_gate", "baseline_lift_gate",
+            "touch_gate", "concentration_gate", "diversification_gate", "orthogonality_gate", "live_potential_gate",
+            "promotion_gate_status", "recommendation", "reason", "support_rows", "distinct_products",
+            "largest_product_share", "baseline_lift", "touch_lift", "live_current_matches",
+        ]
+        payload = {
+            "artifact_type": "orthogonal_rule_candidates",
+            "schema_version": "1.0",
+            "status": status,
+            "generated_candidates": [],
+            "note": "No orthogonal discovery has been run for this scan.",
+        }
+        return (
+            pd.DataFrame(columns=discovery_cols).assign(status=status).iloc[0:0],
+            pd.DataFrame(columns=gate_cols).assign(status=status).iloc[0:0],
+            payload,
+        )
+
+    def _orthogonal_status_tables(self, status: str, latest_ts: pd.Timestamp, reason: str) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+        discovery, gate, payload = self._empty_orthogonal_discovery_tables(status)
+        scan_ts = pd.Timestamp(latest_ts).isoformat()
+        row = {
+            "status": status,
+            "scan_ts": scan_ts,
+            "candidate_id": None,
+            "candidate_name": None,
+            "candidate_family": None,
+            "candidate_kind": None,
+            "target_horizon": None,
+            "conditions_json": None,
+            "anchor_field": None,
+            "source_families": None,
+            "orthogonality_score": None,
+            "orthogonality_reason": None,
+            "support_rows": None,
+            "distinct_products": None,
+            "largest_product_share": None,
+            "mean_forward_return": None,
+            "median_forward_return": None,
+            "mean_max_up_pct": None,
+            "touch_rate": None,
+            "baseline_mean_forward_return": None,
+            "baseline_touch_rate": None,
+            "baseline_lift": None,
+            "touch_lift": None,
+            "live_current_matches": 0,
+            "promotion_score": None,
+            "recommendation": "not_evaluated",
+            "reason": reason,
+        }
+        discovery = pd.concat([discovery, pd.DataFrame([row])], ignore_index=True)
+        gate = pd.concat([gate, pd.DataFrame([{
+            "status": status,
+            "scan_ts": scan_ts,
+            "candidate_id": None,
+            "candidate_name": None,
+            "support_gate": False,
+            "baseline_lift_gate": False,
+            "touch_gate": False,
+            "concentration_gate": False,
+            "diversification_gate": False,
+            "orthogonality_gate": False,
+            "live_potential_gate": False,
+            "promotion_gate_status": "not_evaluated",
+            "recommendation": "not_evaluated",
+            "reason": reason,
+            "support_rows": None,
+            "distinct_products": None,
+            "largest_product_share": None,
+            "baseline_lift": None,
+            "touch_lift": None,
+            "live_current_matches": 0,
+        }])], ignore_index=True)
+        payload.update({"status": status, "note": reason, "generated_at_scan_ts": scan_ts})
+        return discovery, gate, payload
+
+    def _feature_family(self, field: str) -> str:
+        field = str(field or "")
+        if field.startswith("cs_"):
+            return "cross_source"
+        if field.startswith("ca_"):
+            if "volume" in field or "liquidity" in field:
+                return "coinapi_liquidity"
+            if "ret" in field or "dist" in field or "breakout" in field:
+                return "coinapi_price_action"
+            return "coinapi_context"
+        if field.startswith("cx_"):
+            return "market_context"
+        if field.startswith("cb_"):
+            if "volume" in field or "dollar_volume" in field:
+                return "coinbase_liquidity"
+            if "range" in field or "location" in field or "intrabar" in field:
+                return "coinbase_bar_shape"
+            if "rel_to" in field or "btc" in field or "eth" in field:
+                return "coinbase_relative_strength"
+            if "ret" in field or "ema" in field or "sma" in field or "breakout" in field:
+                return "coinbase_price_action"
+            return "coinbase_context"
+        return "other"
+
+    def _existing_live_rule_fields(self, rules: list[dict[str, Any]]) -> tuple[set[str], set[str]]:
+        fields: set[str] = set()
+        families: set[str] = set()
+        for rule in rules:
+            for instance in self.rule_service._resolve_rule_variants(rule):
+                for condition in instance.get("conditions", []) or []:
+                    raw = condition.get("field") or condition.get("feature")
+                    if raw:
+                        resolved = self.rule_service._field_name(str(raw))
+                        fields.add(resolved)
+                        families.add(self._feature_family(resolved))
+        return fields, families
+
+    def _candidate_feature_columns(self, df: pd.DataFrame) -> list[str]:
+        preferred = [
+            "cs_coinbase_vs_coinapi_return_diff", "cs_coinbase_vs_coinapi_close_diff", "cs_cross_source_divergence_flag",
+            "ca_ret_1", "ca_ret_6", "ca_ret_24", "ca_rel_volume_short", "ca_volume_zscore_short",
+            "cb_rel_volume_short", "cb_volume_zscore_short", "cb_close_location_in_bar", "cb_intrabar_range_pct",
+            "cb_ret_1", "cb_ret_3", "cb_ret_6", "cb_ret_12", "cb_ret_24", "cb_sma_5_dist", "cb_sma_10_dist",
+            "cb_sma_20_dist", "cb_ema_12_dist", "cb_ema_26_dist", "cb_breakout_distance_short",
+            "cb_rel_to_btc_ret_6", "cb_rel_to_eth_ret_6", "cx_btc_regime_flag", "cx_eth_regime_flag",
+        ]
+        exclude_prefixes = ("future_", "touched_")
+        exclude_exact = {"ts", "product_id", "base_asset", "quote_asset", "coinapi_symbol_id", "feature_version"}
+        out: list[str] = []
+        for col in preferred + sorted([c for c in df.columns if str(c).startswith(("cb_", "ca_", "cs_", "cx_"))]):
+            if col in out or col not in df.columns or col in exclude_exact or str(col).startswith(exclude_prefixes):
+                continue
+            series = pd.to_numeric(df[col], errors="coerce")
+            valid = series.dropna()
+            if len(valid) < max(20, min(200, int(len(df) * 0.01))):
+                continue
+            if valid.nunique(dropna=True) <= 1:
+                continue
+            out.append(col)
+            if len(out) >= 32:
+                break
+        return out
+
+    def _orthogonal_threshold_specs_for_field(self, hist: pd.DataFrame, field: str) -> list[dict[str, Any]]:
+        series = pd.to_numeric(hist[field], errors="coerce").dropna()
+        if series.empty:
+            return []
+        uniq = sorted(series.unique().tolist())
+        specs: list[dict[str, Any]] = []
+        if len(uniq) <= 3 and set(float(x) for x in uniq).issubset({0.0, 1.0}):
+            if 1.0 in uniq:
+                specs.append({"logic": "==", "value": 1.0, "kind": "binary_flag_true", "quantile": None})
+            return specs
+        name = str(field)
+        if "range" in name or "volatility" in name or "volume" in name or "dollar_volume" in name or "trades" in name:
+            quantiles = [(0.85, ">=", "top_quantile"), (0.15, "<=", "bottom_quantile")]
+        elif "ret" in name or "dist" in name or "diff" in name or "location" in name or "breakout" in name:
+            quantiles = [(0.90, ">=", "top_quantile"), (0.10, "<=", "bottom_quantile")]
+        else:
+            quantiles = [(0.90, ">=", "top_quantile"), (0.10, "<=", "bottom_quantile")]
+        for q, logic, kind in quantiles:
+            try:
+                value = float(series.quantile(q))
+            except Exception:
+                continue
+            if pd.isna(value):
+                continue
+            specs.append({"logic": logic, "value": value, "kind": kind, "quantile": q})
+        return specs
+
+    def _orthogonality_score(self, fields: set[str], families: set[str], existing_fields: set[str], existing_families: set[str]) -> tuple[float, str]:
+        if not fields:
+            return 0.0, "No candidate fields resolved."
+        new_fields = fields - existing_fields
+        new_families = families - existing_families
+        field_score = len(new_fields) / max(len(fields), 1)
+        family_score = len(new_families) / max(len(families), 1)
+        score = 0.65 * field_score + 0.35 * family_score
+        if new_fields and new_families:
+            reason = f"Uses new fields ({', '.join(sorted(new_fields)[:4])}) and new source families ({', '.join(sorted(new_families)[:4])})."
+        elif new_fields:
+            reason = f"Uses new fields ({', '.join(sorted(new_fields)[:4])}) but overlaps current source families."
+        else:
+            reason = "Candidate mostly reuses fields from the current live rule set."
+        return float(score), reason
+
+    def _candidate_rule_payload(self, row: dict[str, Any], live_eligible: bool = False) -> dict[str, Any]:
+        try:
+            conditions = json.loads(row.get("conditions_json") or "[]")
+        except Exception:
+            conditions = []
+        return {
+            "merged_rule_id": row.get("candidate_id"),
+            "name": row.get("candidate_name"),
+            "family_id": row.get("candidate_family"),
+            "rule_kind": "direct_rule",
+            "live_eligible": bool(live_eligible),
+            "live_candidate_recommended": False,
+            "live_candidate_reason": "v1.9.0 generated candidates require manual review and live-shadow validation before eligibility.",
+            "recommended_primary_horizon": row.get("target_horizon") or "h4",
+            "target_horizons": [row.get("target_horizon") or "h4"],
+            "source_attribution": ["orthogonal_discovery_v1_9_0"],
+            "why_interesting": row.get("reason"),
+            "exact_definition": {"all_conditions": conditions},
+        }
+
+    def _orthogonal_candidate_templates(
+        self,
+        prepared_hist: pd.DataFrame,
+        prepared_current: pd.DataFrame,
+        existing_fields: set[str],
+        existing_families: set[str],
+    ) -> list[dict[str, Any]]:
+        templates: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        liquidity_condition: dict[str, Any] | None = None
+        if "cb_dollar_volume_proxy" in prepared_hist.columns:
+            liq = pd.to_numeric(prepared_hist["cb_dollar_volume_proxy"], errors="coerce").dropna()
+            if not liq.empty:
+                threshold = max(100000.0, float(liq.quantile(0.35)))
+                liquidity_condition = {"field": "cb_dollar_volume_proxy", "logic": ">=", "value": threshold}
+        for field in self._candidate_feature_columns(prepared_hist):
+            family = self._feature_family(field)
+            for spec in self._orthogonal_threshold_specs_for_field(prepared_hist, field):
+                conditions = [{"field": field, "logic": spec["logic"], "value": spec["value"]}]
+                # Add a light liquidity sanity gate unless the candidate is itself a liquidity rule.
+                if liquidity_condition and field != "cb_dollar_volume_proxy" and family not in {"coinbase_liquidity", "coinapi_liquidity"}:
+                    conditions.append(dict(liquidity_condition))
+                fields = {self.rule_service._field_name(str(c.get("field"))) for c in conditions if c.get("field")}
+                families = {self._feature_family(f) for f in fields}
+                orth_score, orth_reason = self._orthogonality_score(fields, families, existing_fields, existing_families)
+                direction = "high" if spec["logic"] in {">", ">=", "=="} else "low"
+                candidate_id = f"ORTHO_{field}_{direction}_{str(spec.get('quantile') or spec['kind']).replace('.', '_')}".upper()
+                candidate_id = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in candidate_id)[:120]
+                key = json.dumps(conditions, sort_keys=True, default=str)
+                if key in seen:
+                    continue
+                seen.add(key)
+                templates.append({
+                    "candidate_id": candidate_id,
+                    "candidate_name": f"Orthogonal {family}: {field} {spec['logic']} {spec['value']:.6g}",
+                    "candidate_family": family,
+                    "candidate_kind": spec["kind"],
+                    "target_horizon": "h4",
+                    "conditions": conditions,
+                    "anchor_field": field,
+                    "source_families": "|".join(sorted(families)),
+                    "orthogonality_score": orth_score,
+                    "orthogonality_reason": orth_reason,
+                })
+        # Prefer candidates with new source families/fields first, then keep the search bounded.
+        templates = sorted(templates, key=lambda x: (x["orthogonality_score"], x["candidate_family"], x["candidate_id"]), reverse=True)
+        return templates[:MAX_ORTHOGONAL_CANDIDATES]
+
+    def _gate_orthogonal_candidate(
+        self,
+        row: dict[str, Any],
+        historical_rows_used: int,
+        historical_product_count: int,
+    ) -> tuple[dict[str, Any], str, str, str]:
+        support = int(row.get("support_rows") or 0)
+        distinct = int(row.get("distinct_products") or 0)
+        largest_share = row.get("largest_product_share")
+        baseline_lift = row.get("baseline_lift")
+        touch_lift = row.get("touch_lift")
+        orth_score = float(row.get("orthogonality_score") or 0.0)
+        live_matches = int(row.get("live_current_matches") or 0)
+        min_support = max(20, min(80, int(max(historical_rows_used, 1) * 0.0005)))
+        min_distinct = max(3, min(12, int(max(historical_product_count, 1) * 0.05)))
+        gates = {
+            "support_gate": support >= min_support,
+            "baseline_lift_gate": baseline_lift is not None and float(baseline_lift) >= ORTHOGONAL_MIN_BASELINE_LIFT,
+            "touch_gate": touch_lift is None or float(touch_lift) >= ORTHOGONAL_MIN_TOUCH_LIFT,
+            "concentration_gate": largest_share is None or float(largest_share) <= ORTHOGONAL_MAX_PRODUCT_SHARE,
+            "diversification_gate": distinct >= min_distinct,
+            "orthogonality_gate": orth_score >= 0.55,
+            "live_potential_gate": live_matches > 0,
+        }
+        historical_ok = all(gates[k] for k in ["support_gate", "baseline_lift_gate", "touch_gate", "concentration_gate", "diversification_gate", "orthogonality_gate"])
+        if historical_ok and gates["live_potential_gate"]:
+            return gates, "shadow_candidate_ready", "promote_to_shadow_candidate", "Candidate passes strict historical gates and currently matches at least one live product; validate in live shadow before marking live eligible."
+        if historical_ok:
+            return gates, "historical_watchlist_ready", "watchlist_historical_only", "Candidate passes strict historical gates but has no current live matches; keep as historical watchlist candidate."
+        failed = [k for k, v in gates.items() if not v and k != "live_potential_gate"]
+        reason_map = {
+            "support_gate": "insufficient historical support",
+            "baseline_lift_gate": "insufficient lift over baseline",
+            "touch_gate": "insufficient touch-rate lift",
+            "concentration_gate": "too concentrated in a few products",
+            "diversification_gate": "too few distinct products",
+            "orthogonality_gate": "not sufficiently orthogonal to current live rule fields/families",
+        }
+        reasons = ", ".join(reason_map.get(k, k) for k in failed[:3]) or "failed strict promotion gates"
+        return gates, "rejected_by_gate", "reject_promotion_gate", f"Rejected by promotion gates: {reasons}."
+
+    def _build_orthogonal_discovery_tables(
+        self,
+        snapshot: pd.DataFrame,
+        rules: list[dict[str, Any]],
+        latest_ts: pd.Timestamp,
+    ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+        started = time.monotonic()
+        deadline = started + MAX_ORTHOGONAL_DISCOVERY_SECONDS
+        historical = self.storage.read_frame("feature_table")
+        if historical.empty:
+            return self._orthogonal_status_tables("no_historical_feature_table", latest_ts, "No historical feature table exists yet; orthogonal discovery was skipped.")
+        historical_rows_available = int(len(historical))
+        historical_rows_used = historical_rows_available
+        historical_sample_note = "full_historical_feature_table"
+        if historical_rows_available > MAX_ORTHOGONAL_HISTORICAL_ROWS:
+            historical_sample_note = f"bounded_recent_sample_{MAX_ORTHOGONAL_HISTORICAL_ROWS}_of_{historical_rows_available}"
+            if "ts" in historical.columns:
+                historical = historical.copy()
+                historical["_ts_for_orthogonal_sample"] = pd.to_datetime(historical["ts"], utc=True, errors="coerce")
+                historical = historical.sort_values("_ts_for_orthogonal_sample").tail(MAX_ORTHOGONAL_HISTORICAL_ROWS).drop(columns=["_ts_for_orthogonal_sample"], errors="ignore")
+            else:
+                historical = historical.tail(MAX_ORTHOGONAL_HISTORICAL_ROWS).copy()
+            historical_rows_used = int(len(historical))
+        prepared_hist = self.rule_service._prepare_frame(historical)
+        prepared_current = self.rule_service._prepare_frame(snapshot)
+        baseline = self._global_baseline_metrics(prepared_hist, "h4")
+        baseline_touch = baseline.get("touch_rate")
+        existing_fields, existing_families = self._existing_live_rule_fields(rules)
+        templates = self._orthogonal_candidate_templates(prepared_hist, prepared_current, existing_fields, existing_families)
+        if not templates:
+            return self._orthogonal_status_tables("no_candidate_templates", latest_ts, "No orthogonal feature templates were available for this feature table.")
+        historical_product_count = int(prepared_hist["product_id"].nunique()) if "product_id" in prepared_hist.columns else 0
+        rows: list[dict[str, Any]] = []
+        gate_rows: list[dict[str, Any]] = []
+        time_budget_exhausted = False
+        for template in templates:
+            if time.monotonic() >= deadline:
+                time_budget_exhausted = True
+                break
+            mask, _, missing = self.rule_service._build_rule_mask(prepared_hist, template["conditions"])
+            if missing or mask is None:
+                continue
+            current_mask, _, current_missing = self.rule_service._build_rule_mask(prepared_current, template["conditions"])
+            live_matches = 0 if current_mask is None or current_missing else int(current_mask.fillna(False).astype(bool).sum())
+            metrics = self._historical_metrics_for_mask(prepared_hist, mask, "h4")
+            mean = metrics.get("mean_forward_return")
+            baseline_mean = baseline.get("mean_forward_return")
+            touch = metrics.get("touch_rate")
+            baseline_lift = None if mean is None or baseline_mean is None else float(mean) - float(baseline_mean)
+            touch_lift = None if touch is None or baseline_touch is None else float(touch) - float(baseline_touch)
+            score = 0.0
+            if baseline_lift is not None:
+                score += float(baseline_lift) * 10000.0
+            if touch_lift is not None:
+                score += float(touch_lift) * 250.0
+            score += np.log1p(float(metrics.get("support_rows") or 0)) * 5.0
+            score += float(live_matches) * 10.0
+            score += float(template["orthogonality_score"]) * 25.0
+            if metrics.get("largest_product_share") is not None:
+                score -= float(metrics["largest_product_share"]) * 20.0
+            row = {
+                "status": "ok",
+                "scan_ts": pd.Timestamp(latest_ts).isoformat(),
+                "candidate_id": template["candidate_id"],
+                "candidate_name": template["candidate_name"],
+                "candidate_family": template["candidate_family"],
+                "candidate_kind": template["candidate_kind"],
+                "target_horizon": "h4",
+                "conditions_json": json.dumps(template["conditions"], sort_keys=True, default=str),
+                "anchor_field": template["anchor_field"],
+                "source_families": template["source_families"],
+                "orthogonality_score": template["orthogonality_score"],
+                "orthogonality_reason": template["orthogonality_reason"],
+                "support_rows": metrics.get("support_rows"),
+                "distinct_products": metrics.get("distinct_products"),
+                "largest_product_share": metrics.get("largest_product_share"),
+                "mean_forward_return": metrics.get("mean_forward_return"),
+                "median_forward_return": metrics.get("median_forward_return"),
+                "mean_max_up_pct": metrics.get("mean_max_up_pct"),
+                "touch_rate": metrics.get("touch_rate"),
+                "baseline_mean_forward_return": baseline_mean,
+                "baseline_touch_rate": baseline_touch,
+                "baseline_lift": baseline_lift,
+                "touch_lift": touch_lift,
+                "live_current_matches": live_matches,
+                "promotion_score": float(score),
+                "historical_rows_available": historical_rows_available,
+                "historical_rows_used": historical_rows_used,
+                "historical_sample_note": historical_sample_note,
+            }
+            gates, gate_status, recommendation, reason = self._gate_orthogonal_candidate(row, historical_rows_used, historical_product_count)
+            row["recommendation"] = recommendation
+            row["reason"] = reason
+            row["promotion_gate_status"] = gate_status
+            rows.append(row)
+            gate_rows.append({
+                "status": "ok",
+                "scan_ts": row["scan_ts"],
+                "candidate_id": row["candidate_id"],
+                "candidate_name": row["candidate_name"],
+                **gates,
+                "promotion_gate_status": gate_status,
+                "recommendation": recommendation,
+                "reason": reason,
+                "support_rows": row["support_rows"],
+                "distinct_products": row["distinct_products"],
+                "largest_product_share": row["largest_product_share"],
+                "baseline_lift": row["baseline_lift"],
+                "touch_lift": row["touch_lift"],
+                "live_current_matches": row["live_current_matches"],
+            })
+        discovery_df = pd.DataFrame(rows)
+        gate_df = pd.DataFrame(gate_rows)
+        if discovery_df.empty:
+            return self._orthogonal_status_tables("no_candidates_passed_evaluation", latest_ts, "Orthogonal templates were generated but none could be evaluated against the historical feature table.")
+        discovery_df = discovery_df.sort_values(["promotion_score", "baseline_lift", "support_rows"], ascending=[False, False, False], na_position="last").reset_index(drop=True)
+        gate_df = gate_df.set_index("candidate_id").loc[discovery_df["candidate_id"].tolist()].reset_index() if not gate_df.empty else gate_df
+        if time_budget_exhausted:
+            discovery_df["time_budget_exhausted"] = True
+            gate_df["time_budget_exhausted"] = True
+        reviewable = discovery_df.loc[discovery_df["promotion_gate_status"].isin(["shadow_candidate_ready", "historical_watchlist_ready"])].copy()
+        generated_candidates = [self._candidate_rule_payload(row.to_dict(), live_eligible=False) for _, row in reviewable.head(20).iterrows()]
+        payload = {
+            "artifact_type": "orthogonal_rule_candidates",
+            "schema_version": "1.0",
+            "status": "ok",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "scan_ts": pd.Timestamp(latest_ts).isoformat(),
+            "app_version": self.settings.app_version,
+            "candidate_count": int(len(discovery_df)),
+            "reviewable_candidate_count": int(len(reviewable)),
+            "shadow_candidate_ready_count": int((discovery_df["promotion_gate_status"] == "shadow_candidate_ready").sum()),
+            "historical_watchlist_ready_count": int((discovery_df["promotion_gate_status"] == "historical_watchlist_ready").sum()),
+            "generated_candidates": generated_candidates,
+            "note": "Generated candidates are evidence artifacts only. They are not auto-promoted to live eligibility; upload/apply manually only after review and live-shadow validation.",
+        }
+        return discovery_df, gate_df, payload
+
     def run_cycle(self, request: LiveScanRequest, run_id_override: str | None = None) -> dict[str, Any]:
         step = "live_scan_cycle"
         run_id = run_id_override or self.storage.make_run_id()
@@ -932,6 +1379,34 @@ class LiveScannerService:
             self.storage.update_status(
                 step,
                 "running",
+                message="Running bounded orthogonal candidate discovery",
+                phase="orthogonal_discovery",
+                latest_signal_ts=latest_ts.isoformat(),
+                snapshot_rows=int(len(snapshot)),
+                shortlist_rows=int(len(shortlist)),
+                rule_hits=int(len(rule_hits)),
+                near_match_rows=int(len(near_matches)),
+                near_match_replay_rows=int(len(near_match_replay)),
+                relaxation_candidate_rows=int(len(relaxation_candidates)),
+                coverage_frontier_rows=int(len(coverage_frontier)),
+                adaptive_replay_warning=adaptive_warning,
+                orthogonal_discovery_seconds_budget=MAX_ORTHOGONAL_DISCOVERY_SECONDS,
+                orthogonal_candidate_cap=MAX_ORTHOGONAL_CANDIDATES,
+            )
+            orthogonal_warning = None
+            try:
+                orthogonal_discovery, promotion_gates, orthogonal_rules_payload = self._build_orthogonal_discovery_tables(snapshot, rules, latest_ts)
+            except Exception as orthogonal_exc:
+                orthogonal_warning = str(orthogonal_exc)
+                orthogonal_discovery, promotion_gates, orthogonal_rules_payload = self._orthogonal_status_tables(
+                    "orthogonal_discovery_failed",
+                    latest_ts,
+                    f"Orthogonal discovery failed, but the core live scan completed: {orthogonal_exc}",
+                )
+
+            self.storage.update_status(
+                step,
+                "running",
                 message="Writing live scan artifacts",
                 phase="writing_artifacts",
                 latest_signal_ts=latest_ts.isoformat(),
@@ -942,7 +1417,10 @@ class LiveScannerService:
                 near_match_replay_rows=int(len(near_match_replay)),
                 relaxation_candidate_rows=int(len(relaxation_candidates)),
                 coverage_frontier_rows=int(len(coverage_frontier)),
+                orthogonal_candidate_rows=int(len(orthogonal_discovery)),
+                promotion_gate_rows=int(len(promotion_gates)),
                 adaptive_replay_warning=adaptive_warning,
+                orthogonal_discovery_warning=orthogonal_warning,
             )
 
             shortlist_path = self.storage.write_csv(shortlist, f"live_scan_results__{run_id}", compress=False)
@@ -952,6 +1430,10 @@ class LiveScannerService:
             near_replay_path = self.storage.write_csv(near_match_replay, f"near_match_replay_summary__{run_id}", compress=False)
             relaxation_path = self.storage.write_csv(relaxation_candidates, f"rule_relaxation_candidates__{run_id}", compress=False)
             frontier_path = self.storage.write_csv(coverage_frontier, f"coverage_quality_frontier__{run_id}", compress=False)
+            orthogonal_path = self.storage.write_csv(orthogonal_discovery, f"orthogonal_candidate_discovery__{run_id}", compress=False)
+            promotion_gate_path = self.storage.write_csv(promotion_gates, f"promotion_gate_summary__{run_id}", compress=False)
+            orthogonal_rules_path = self.storage.export_path(f"orthogonal_rule_candidates__{run_id}", ".json")
+            self.storage.write_json(orthogonal_rules_payload, orthogonal_rules_path)
             summary_df = shortlist[["scanner_rank", "product_id", "matched_rule_count", "matched_rule_ids", "best_priority", "ranking_score", "matched_primary_horizons", "data_quality_note"]].copy() if not shortlist.empty else pd.DataFrame(columns=["scanner_rank", "product_id", "matched_rule_count", "matched_rule_ids", "best_priority", "ranking_score", "matched_primary_horizons", "data_quality_note"])
             summary_path = self.storage.write_csv(summary_df, f"live_scan_summary__{run_id}", compress=False)
             manifest = {
@@ -991,7 +1473,14 @@ class LiveScannerService:
                     "best_relaxation_rule_id": coverage_frontier.iloc[0]["merged_rule_id"] if not coverage_frontier.empty else None,
                     "best_relaxation_variant_id": coverage_frontier.iloc[0]["variant_id"] if not coverage_frontier.empty else None,
                     "best_relaxation_recommendation": coverage_frontier.iloc[0]["recommendation"] if not coverage_frontier.empty else None,
+                    "orthogonal_candidate_rows": int(len(orthogonal_discovery)),
+                    "promotion_gate_rows": int(len(promotion_gates)),
+                    "shadow_candidate_ready_count": int((orthogonal_discovery.get("promotion_gate_status") == "shadow_candidate_ready").sum()) if not orthogonal_discovery.empty and "promotion_gate_status" in orthogonal_discovery.columns else 0,
+                    "historical_watchlist_ready_count": int((orthogonal_discovery.get("promotion_gate_status") == "historical_watchlist_ready").sum()) if not orthogonal_discovery.empty and "promotion_gate_status" in orthogonal_discovery.columns else 0,
+                    "best_orthogonal_candidate_id": orthogonal_discovery.iloc[0]["candidate_id"] if not orthogonal_discovery.empty and "candidate_id" in orthogonal_discovery.columns else None,
+                    "best_orthogonal_recommendation": orthogonal_discovery.iloc[0]["recommendation"] if not orthogonal_discovery.empty and "recommendation" in orthogonal_discovery.columns else None,
                     "adaptive_replay_warning": adaptive_warning,
+                    "orthogonal_discovery_warning": orthogonal_warning,
                     "skipped_rules": skipped,
                 },
                 "preview": shortlist.head(50).to_dict(orient="records"),
@@ -1000,17 +1489,20 @@ class LiveScannerService:
                 "near_match_replay_preview": near_match_replay.head(50).to_dict(orient="records"),
                 "relaxation_candidate_preview": relaxation_candidates.head(50).to_dict(orient="records"),
                 "coverage_quality_frontier_preview": coverage_frontier.head(50).to_dict(orient="records"),
+                "orthogonal_candidate_preview": orthogonal_discovery.head(50).to_dict(orient="records"),
+                "promotion_gate_preview": promotion_gates.head(50).to_dict(orient="records"),
+                "orthogonal_rule_candidates_preview": orthogonal_rules_payload.get("generated_candidates", [])[:20] if isinstance(orthogonal_rules_payload, dict) else [],
             }
             manifest_path = self.storage.export_path(f"live_scan_manifest__{run_id}", ".json")
             self.storage.write_json(manifest, manifest_path)
             pack_path = self.storage.export_path(f"live_scan_pack__{run_id}", ".zip")
             with zipfile.ZipFile(pack_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-                for path in [shortlist_path, hits_path, near_path, coverage_path, near_replay_path, relaxation_path, frontier_path, summary_path, manifest_path]:
+                for path in [shortlist_path, hits_path, near_path, coverage_path, near_replay_path, relaxation_path, frontier_path, orthogonal_path, promotion_gate_path, orthogonal_rules_path, summary_path, manifest_path]:
                     zf.write(path, arcname=Path(path).name)
-            artifacts = [self.storage.file_info(path) for path in [shortlist_path, hits_path, near_path, coverage_path, near_replay_path, relaxation_path, frontier_path, summary_path, manifest_path, pack_path]]
+            artifacts = [self.storage.file_info(path) for path in [shortlist_path, hits_path, near_path, coverage_path, near_replay_path, relaxation_path, frontier_path, orthogonal_path, promotion_gate_path, orthogonal_rules_path, summary_path, manifest_path, pack_path]]
             manifest["artifacts"] = artifacts
             self.storage.write_latest_live_scan_manifest(manifest)
-            self.storage.update_status(step, "completed", message="Live scanner completed", run_id=run_id, latest_signal_ts=latest_ts.isoformat(), shortlist_rows=int(len(shortlist)), rule_hits=int(len(rule_hits)), near_match_rows=int(len(near_matches)), near_match_replay_rows=int(len(near_match_replay)), relaxation_candidate_rows=int(len(relaxation_candidates)), coverage_frontier_rows=int(len(coverage_frontier)), rules_evaluated=int(len(rules)), adaptive_replay_warning=adaptive_warning, pack_artifact=pack_path.name)
+            self.storage.update_status(step, "completed", message="Live scanner completed", run_id=run_id, latest_signal_ts=latest_ts.isoformat(), shortlist_rows=int(len(shortlist)), rule_hits=int(len(rule_hits)), near_match_rows=int(len(near_matches)), near_match_replay_rows=int(len(near_match_replay)), relaxation_candidate_rows=int(len(relaxation_candidates)), coverage_frontier_rows=int(len(coverage_frontier)), orthogonal_candidate_rows=int(len(orthogonal_discovery)), promotion_gate_rows=int(len(promotion_gates)), rules_evaluated=int(len(rules)), adaptive_replay_warning=adaptive_warning, orthogonal_discovery_warning=orthogonal_warning, pack_artifact=pack_path.name)
             return manifest
         except Exception as exc:
             self.storage.update_status(step, "failed", error=str(exc), traceback=traceback.format_exc())

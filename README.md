@@ -1,4 +1,4 @@
-# Coinbase Crypto Research Collector v1.8.1
+# Coinbase Crypto Research Collector v1.9.0
 
 A FastAPI research app for collecting a Coinbase-defined spot crypto universe, mapping it to CoinAPI symbols, computing compact research features, and exporting comparison-ready datasets that preserve feature provenance.
 
@@ -33,7 +33,7 @@ It does that by keeping feature families separated and exportable across three s
 - Backtests the attached merged rule library on historic feature data with selectable horizons, individual/collective execution modes, progress reporting, result tables, and downloadable result packs.
 - Runs live shadow validation on the latest completed hourly bar, freezes signal snapshots, and resolves H1/H4/H24 outcomes over later cycles with downloadable live validation packs.
 - Provides one-click downloadable health/status snapshots and an operator snapshot ZIP for easy share-back from active Scan/Live workflows.
-- Adds live-scan near-match diagnostics, adaptive relaxation candidates, historical near-match replay summaries, and a coverage-quality frontier for shadow-candidate research.
+- Adds live-scan near-match diagnostics, adaptive relaxation candidates, historical near-match replay summaries, a coverage-quality frontier, and orthogonal candidate discovery with strict promotion gates.
 
 ## Main endpoints
 
@@ -126,7 +126,9 @@ See `DEPLOYMENT.md`, `POST_DEPLOY_STEPS.md`, and `TEST_RESULTS.md`.
 By default, v1.0.1 keeps quote-matching SPOT products even if Coinbase marks them `view_only` or `trading_disabled` for the API key context. Those flags are preserved as metadata for later filtering, but they no longer zero out the research universe by default. Set `STRICT_COINBASE_TRADABILITY_FILTERS=true` if you want to exclude those rows at universe-build time.
 
 
-## v1.8.1
-- Isolated live-shadow signal/outcome state by resolved live rule set so older runs from different rule selections no longer contaminate current live evidence.
-- Added scope metadata to live-validation manifests, including ignored legacy/other-scope row counts for operator truthfulness.
-- Surfaced live scope context in the UI so operators can see that current live summaries are scoped to the active resolved rule set.
+## v1.9.0
+- Added bounded orthogonal live-candidate discovery to each live scan using the historical feature table.
+- Added strict promotion gates for support, baseline lift, touch-rate lift, product concentration, diversification, orthogonality, and current live-scan potential.
+- Added downloadable `orthogonal_candidate_discovery__<run_id>.csv`, `promotion_gate_summary__<run_id>.csv`, and `orthogonal_rule_candidates__<run_id>.json` artifacts to the live scan pack.
+- Surfaced Orthogonal candidate discovery and Promotion gates sections in the Scan tab.
+- Generated candidates are evidence artifacts only; nothing is auto-promoted to live eligibility.

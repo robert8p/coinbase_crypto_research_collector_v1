@@ -1373,7 +1373,7 @@
                 <h2>Adaptive near-match replay</h2>
                 <p class="section-copy">Historical replay of relaxed shadow-candidate variants derived from current near misses. These are research outputs, not automatic promotions.</p>
               </div>
-              <span class="pill soft">v1.8.1</span>
+              <span class="pill soft">v1.9.0</span>
             </div>
             <div class="table-shell">
               <div class="scroll-x">
@@ -1415,6 +1415,62 @@
                     </tr>
                   </thead>
                   <tbody id="liveScanRelaxationTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-grid">
+          <div class="card span-7">
+            <div class="card-header">
+              <div>
+                <h2>Orthogonal candidate discovery</h2>
+                <p class="section-copy">New simple rule-family candidates searched from the historical feature table. These are evidence outputs only and are not auto-promoted.</p>
+              </div>
+              <span class="pill soft">v1.9.0</span>
+            </div>
+            <div class="table-shell">
+              <div class="scroll-x">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Candidate</th>
+                      <th>Family</th>
+                      <th>Support</th>
+                      <th>Lift</th>
+                      <th>Touch lift</th>
+                      <th>Live now</th>
+                      <th>Recommendation</th>
+                    </tr>
+                  </thead>
+                  <tbody id="liveScanOrthogonalTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="card span-5">
+            <div class="card-header">
+              <div>
+                <h2>Promotion gates</h2>
+                <p class="section-copy">Strict gates for support, baseline lift, touch-rate lift, concentration, diversification, orthogonality, and current live potential.</p>
+              </div>
+              <span class="pill soft">Gate review</span>
+            </div>
+            <div class="table-shell">
+              <div class="scroll-x">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Candidate</th>
+                      <th>Status</th>
+                      <th>Support</th>
+                      <th>Lift</th>
+                      <th>Live</th>
+                    </tr>
+                  </thead>
+                  <tbody id="liveScanPromotionGateTableBody"></tbody>
                 </table>
               </div>
             </div>
@@ -2385,7 +2441,7 @@
           <td>${htmlEscape(row.failed_conditions || '')}</td>
         </tr>
       `).join('');
-      setHtml('liveScanNearMatchTableBody', nearBody || '<tr><td colspan="7">No near-match diagnostics available yet. Run a fresh scan on v1.8.1.</td></tr>');
+      setHtml('liveScanNearMatchTableBody', nearBody || '<tr><td colspan="7">No near-match diagnostics available yet. Run a fresh scan on v1.9.0.</td></tr>');
       const coverageRows = scan.coverage_preview || [];
       const coverageBody = coverageRows.map(row => `
         <tr>
@@ -2396,7 +2452,7 @@
           <td>${htmlEscape(fmtNum(row.live_hit_count_7d))}</td>
         </tr>
       `).join('');
-      setHtml('liveScanCoverageTableBody', coverageBody || '<tr><td colspan="5">No coverage telemetry available yet. Run a fresh scan on v1.8.1.</td></tr>');
+      setHtml('liveScanCoverageTableBody', coverageBody || '<tr><td colspan="5">No coverage telemetry available yet. Run a fresh scan on v1.9.0.</td></tr>');
       const replayRows = scan.coverage_quality_frontier_preview || [];
       const replayBody = replayRows.map(row => `
         <tr>
@@ -2408,7 +2464,7 @@
           <td>${htmlEscape(row.recommendation || '')}</td>
         </tr>
       `).join('');
-      setHtml('liveScanReplayTableBody', replayBody || '<tr><td colspan="6">No adaptive near-match replay available yet. Run a fresh scan on v1.8.1 after a historical feature table exists.</td></tr>');
+      setHtml('liveScanReplayTableBody', replayBody || '<tr><td colspan="6">No adaptive near-match replay available yet. Run a fresh scan on v1.9.0 after a historical feature table exists.</td></tr>');
       const relaxationRows = scan.relaxation_candidate_preview || [];
       const relaxationBody = relaxationRows.map(row => `
         <tr>
@@ -2420,6 +2476,30 @@
         </tr>
       `).join('');
       setHtml('liveScanRelaxationTableBody', relaxationBody || '<tr><td colspan="5">No relaxation candidates available yet.</td></tr>');
+      const orthogonalRows = scan.orthogonal_candidate_preview || [];
+      const orthogonalBody = orthogonalRows.map(row => `
+        <tr>
+          <td>${htmlEscape(row.candidate_id || '')}</td>
+          <td>${htmlEscape(row.candidate_family || '')}</td>
+          <td>${htmlEscape(fmtNum(row.support_rows))}</td>
+          <td>${row.baseline_lift == null ? '—' : Number(row.baseline_lift).toFixed(4)}</td>
+          <td>${row.touch_lift == null ? '—' : Number(row.touch_lift).toFixed(3)}</td>
+          <td>${htmlEscape(fmtNum(row.live_current_matches))}</td>
+          <td>${htmlEscape(row.recommendation || '')}</td>
+        </tr>
+      `).join('');
+      setHtml('liveScanOrthogonalTableBody', orthogonalBody || '<tr><td colspan="7">No orthogonal candidate discovery available yet. Run a fresh scan on v1.9.0 after a historical feature table exists.</td></tr>');
+      const gateRows = scan.promotion_gate_preview || [];
+      const gateBody = gateRows.map(row => `
+        <tr>
+          <td>${htmlEscape(row.candidate_id || '')}</td>
+          <td>${htmlEscape(row.promotion_gate_status || '')}</td>
+          <td>${htmlEscape(fmtNum(row.support_rows))}</td>
+          <td>${row.baseline_lift == null ? '—' : Number(row.baseline_lift).toFixed(4)}</td>
+          <td>${htmlEscape(fmtNum(row.live_current_matches))}</td>
+        </tr>
+      `).join('');
+      setHtml('liveScanPromotionGateTableBody', gateBody || '<tr><td colspan="5">No promotion gate summary available yet.</td></tr>');
       const selectedLiveEligible = getSelectedRuleIds().filter(id => { const rule = ruleLibrary.find(item => ruleIdentity(item) === id); return rule?.rule_kind === 'direct_rule' && rule?.live_eligible; }).length;
       setText('liveScanConfigSummary', selectedLiveEligible ? `${selectedLiveEligible} selected live-eligible direct rules are ready to scan. The scanner evaluates the latest completed hourly snapshot and returns a ranked shortlist plus near-match diagnostics.` : 'Mark one or more direct rules as live eligible on the Rules tab, or run all live-eligible direct rules. The scanner excludes non-direct and non-live-eligible rules by default.');
     }

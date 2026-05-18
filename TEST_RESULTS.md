@@ -1,19 +1,17 @@
 # Test Results
 
-Version: 1.8.1
+Version: 1.9.0
 
 Validation performed in this build:
 
-- Live-scan adaptive replay is now bounded and fail-soft so the core scan pack can complete reliably.
-- Adaptive replay exceptions now produce downloadable diagnostic rows instead of failing the whole live scan.
-- Long-running / interrupted background tasks are now classified as stale-running warnings after 30 minutes.
-- Existing v1.8.0 adaptive replay outputs remain present in scan packs.
-- Regression coverage added for adaptive replay fail-soft behavior and stale-running status classification.
+- Live scan still completes with all v1.8.1 bounded/fail-soft adaptive replay behavior preserved.
+- Orthogonal candidate discovery generates downloadable candidate, promotion-gate, and reviewable rule JSON artifacts.
+- Scan manifest now includes orthogonal candidate and promotion-gate previews.
+- Scan UI includes Orthogonal candidate discovery and Promotion gates sections.
+- Regression coverage added for orthogonal discovery candidate/gate output generation.
 
 Results:
 
-- 15 passed
-- 15 passed
-- 15 passed
+- 46 passed
 
-Combined: all 45 collected tests passed across split runs.
+Combined: all 46 collected tests passed in a full suite run.

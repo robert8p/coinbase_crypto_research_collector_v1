@@ -155,3 +155,19 @@ The Scan, Live, and Diagnostics tabs now include one-click downloads for:
 - an operator snapshot ZIP containing health, status, and the latest manifests
 
 Use these when a run looks wrong, stuck, or unexpectedly empty and you want a precise share-back bundle without manually hunting through tabs.
+
+
+## 13) v1.9.0 live scan research outputs
+
+After deploying v1.9.0:
+
+1. Open `/health` and confirm version `1.9.0`.
+2. Go to **Rules** and use **Auto-apply recommended live set**.
+3. Go to **Scan** and run a fresh live scan.
+4. Download `live_scan_pack__<run_id>.zip` and `operator_snapshot__<suffix>.zip`.
+5. In the scan pack, review:
+   - `orthogonal_candidate_discovery__<run_id>.csv`
+   - `promotion_gate_summary__<run_id>.csv`
+   - `orthogonal_rule_candidates__<run_id>.json`
+
+Do not mark any generated candidate as live eligible until it has been reviewed and separately validated through live shadow.
